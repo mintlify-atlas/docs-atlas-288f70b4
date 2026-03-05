@@ -1,0 +1,131 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "Simple Kalshi Bot",
+  "projectDescription": "Algorithmic trading bot for Kalshi markets with genetic algorithm optimization and multiple trading strategies.",
+  "theme": "palm",
+  "primaryColor": "#10b981",
+  "lightColor": "#6ee7b7",
+  "darkColor": "#047857",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/paper-trading",
+              "concepts/real-trading"
+            ]
+          },
+          {
+            "group": "Trading Strategies",
+            "pages": [
+              "strategies/overview",
+              "strategies/previous",
+              "strategies/momentum",
+              "strategies/consensus"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/configuration",
+              "guides/running-bot",
+              "guides/analyzing-results"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Genetic Algorithm",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "genetic/introduction",
+              "genetic/architecture"
+            ]
+          },
+          {
+            "group": "Evolution System",
+            "pages": [
+              "genetic/genome",
+              "genetic/fitness",
+              "genetic/selection",
+              "genetic/operators"
+            ]
+          },
+          {
+            "group": "Running Evolution",
+            "pages": [
+              "genetic/quickstart",
+              "genetic/monitoring",
+              "genetic/analysis"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Modules",
+            "pages": [
+              "api/bot",
+              "api/kalshi-client",
+              "api/strategies"
+            ]
+          },
+          {
+            "group": "Genetic Modules",
+            "pages": [
+              "api/genetic/genome",
+              "api/genetic/evolution",
+              "api/genetic/engine",
+              "api/genetic/bot"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/environment-variables",
+              "api/genetic-config"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Paper trading simulation with CSV logging",
+    "Real trading with Kalshi API integration",
+    "Multiple trading strategies (PREVIOUS, MOMENTUM, CONSENSUS)",
+    "Genetic algorithm for strategy optimization",
+    "Risk management and position sizing",
+    "BTC 15-minute market support",
+    "Demo and production API modes",
+    "Real-time performance monitoring"
+  ],
+  "publicApiSurface": [
+    "bot.py - Main paper trading bot",
+    "consensus.py - Real trading bot with CONSENSUS strategy",
+    "kalshi_client.KalshiClient - Authenticated API client",
+    "genetic.runner.main() - Genetic algorithm entry point",
+    "genetic.genome.Genome - Strategy genome definition",
+    "genetic.evolution.evolve() - Evolution mechanics",
+    "genetic.bot.GeneticBot - Genetic trading bot",
+    "get_btc_price() - BTC price fetching",
+    "get_open_market() - Market discovery",
+    "place_order() - Order execution"
+  ]
+}
