@@ -1,0 +1,278 @@
+---
+title: "Paper Trading Mode"
+description: "Run the bot in simulation mode without real money"
+---
+
+## What is Paper Trading?
+
+Paper trading (also called "mock trading" or "backtesting") allows you to run the Simple Kalshi Bot without placing real orders. This is perfect for:
+
+- Testing strategies before risking real money
+- Understanding how the bot behaves
+- Analyzing strategy performance over time
+- Developing and debugging new strategies
+
+<Info>
+Paper trading uses real market data from Kalshi but simulates all trade execution locally.
+</Info>
+
+## How It Works
+
+The paper trading bot (`bot.py`) operates in a continuous loop:
+
+<Steps>
+  <Step title="Fetch Market Data">
+    Polls Kalshi's public API to get current market prices and settlement data
+  </Step>
+  <Step title="Generate Signals">
+    All seven strategies analyze market conditions and generate trading signals
+  </Step>
+  <Step title="Simulate Trades">
+    Instead of placing real orders, trades are logged to a CSV file
+  </Step>
+  <Step title="Track Settlements">
+    Monitors when markets settle and calculates profit/loss for each simulated trade
+  </Step>
+</Steps>
+
+## Running Paper Trading
+
+### Basic Usage
+
+```bash
+python bot.py
+```
+
+The bot will start monitoring markets and logging trades to `data/mock_trades.csv`.
+
+### Configuration
+
+Configure the bot using environment variables or a `.env` file:
+
+```bash
+# Series to trade
+SERIES_TICKER=KXBTC15M
+
+# Stake amount per trade (in USD)
+STAKE_USD=5.0
+
+# Poll interval in seconds
+POLL_SECONDS=5
+
+# CSV output file
+TRADES_CSV=data/mock_trades.csv
+
+# Risk management for CONSENSUS strategy
+INITIAL_BANKROLL_USD=500
+CONSENSUS_RISK_PCT=0.01
+CONSENSUS_MAX_RISK_PCT=0.02
+CONSENSUS_MAX_PRICE=0.55
+CONSENSUS_DAILY_LOSS_CAP_R=3
+CONSENSUS_WEEKLY_LOSS_CAP_R=8
+```
+
+<Warning>
+Paper trading requires an active internet connection to fetch real-time market data from Kalshi and BTC prices from Coinbase.
+</Warning>
+
+## Trade Logging
+
+All simulated trades are saved to a CSV file with complete trade details:
+
+### CSV Structure
+
+```python
+# From bot.py:97-105
+fieldnames = [
+    "time",              # ISO timestamp when trade was placed
+    "strategy",          # PREVIOUS, MOMENTUM, CONSENSUS, etc.
+    "previous_ticker",   # Previous market ticker (if applicable)
+    "previous_result",   # Previous market result or signal info
+    "buy_ticker",        # Market ticker being traded
+    "buy_side",          # "yes" or "no"
+    "stake_usd",         # Amount wagered
+    "price_usd",         # Price per contract (0.00 to 1.00)
+    "contracts",         # Number of contracts purchased
+    "fee_usd",           # Trading fees (for CONSENSUS strategies)
+    "gross_profit_usd",  # Profit before fees
+    "outcome",           # "WIN", "LOSS", or empty if pending
+    "payout_usd",        # Payout received
+    "profit_usd"         # Net profit/loss
+]
+```
+
+### Example Trade Entry
+
+```csv
+time,strategy,previous_ticker,previous_result,buy_ticker,buy_side,stake_usd,price_usd,contracts,fee_usd,gross_profit_usd,outcome,payout_usd,profit_usd
+2026-03-05T14:30:00,CONSENSUS,KXBTC15M-26MAR05-T2030,PREV=yes MOM=yes,KXBTC15M-26MAR05-T2045,yes,5.0,0.52,9.615,0.0,4.615,WIN,9.615,4.615
+```
+
+## Mock Trade Execution
+
+When a strategy decides to trade, the bot creates a simulated trade:
+
+```python
+# From bot.py:589-607
+trade = {
+    "time": now.isoformat(),
+    "strategy": "CONSENSUS",
+    "previous_ticker": "",
+    "previous_result": f"PREV={prev_signal} MOM={mom_signal}",
+    "buy_ticker": ticker,
+    "buy_side": side,
+    "stake_usd": round(stake, 4),
+    "price_usd": round(price, 4),
+    "contracts": contracts,
+    "fee_usd": "",
+    "gross_profit_usd": "",
+    "outcome": "",
+    "payout_usd": "",
+    "profit_usd": "",
+}
+trades.append(trade)
+save_trades(trades)
+```
+
+<Note>
+Trades are immediately saved to CSV to prevent data loss if the bot crashes.
+</Note>
+
+## Settlement Tracking
+
+The bot continuously checks pending trades for settlement:
+
+```python
+# From bot.py:323-356
+for trade in trades:
+    if trade.get("outcome"):
+        continue  # Already settled
+    
+    buy_ticker = trade.get("buy_ticker")
+    if not buy_ticker:
+        continue
+    
+    try:
+        m = get_market(buy_ticker)
+        result = get_settled_side(m)
+        if result:
+            buy_side = trade.get("buy_side")
+            contracts = float(trade.get("contracts", 0))
+            stake = float(trade.get("stake_usd", 0))
+            
+            won = (result == buy_side)
+            payout = contracts if won else 0
+            gross_profit = payout - stake
+            fee = stake * CONSENSUS_FEE_PCT if trade.get("strategy") in ("CONSENSUS", "CONSENSUS_2") else 0.0
+            profit = gross_profit - fee
+            
+            trade["outcome"] = "WIN" if won else "LOSS"
+            trade["payout_usd"] = round(payout, 4)
+            trade["gross_profit_usd"] = round(gross_profit, 4)
+            trade["fee_usd"] = round(fee, 4)
+            trade["profit_usd"] = round(profit, 4)
+```
+
+## Performance Statistics
+
+The bot displays real-time performance metrics:
+
+```python
+# From bot.py:108-137
+def calc_stats(trades, strategy=None):
+    total_staked = 0.0
+    total_profit = 0.0
+    wins = 0
+    losses = 0
+    pending = 0
+    
+    for t in trades:
+        if strategy and t.get("strategy") != strategy:
+            continue
+        total_staked += float(t.get("stake_usd", 0))
+        profit = t.get("profit_usd", "")
+        if profit != "":
+            p = float(profit)
+            total_profit += p
+            if p > 0:
+                wins += 1
+            else:
+                losses += 1
+        else:
+            pending += 1
+```
+
+### Console Output
+
+```
+[14:30:15] KXBTC15M-26MAR05-T2045 (420s) | yes=$0.52 no=$0.48 | BTC=94,250 | 
+P:$+12.50 M:$-8.20 C:$+15.40 M15:$+3.10 P2:$+6.00 C2:$+18.75 A:$+2.30 CB:$518.75
+```
+
+Legend:
+- **P**: PREVIOUS strategy P&L
+- **M**: MOMENTUM strategy P&L
+- **C**: CONSENSUS strategy P&L
+- **M15**: MOMENTUM_15 strategy P&L
+- **P2**: PREVIOUS_2 strategy P&L
+- **C2**: CONSENSUS_2 strategy P&L
+- **A**: ARBITRAGE strategy P&L
+- **CB**: CONSENSUS bankroll
+
+## Analyzing Results
+
+After running the bot, analyze performance using the analysis scripts:
+
+```bash
+python analyze.py
+```
+
+This generates comprehensive statistics for each strategy:
+
+<CodeGroup>
+```bash Example Output
+=== FINAL STATS ===
+PREVIOUS:  $+12.50 | 15W/8L | 2 pending
+MOMENTUM:  $-8.20 | 10W/13L | 2 pending
+CONSENSUS: $+15.40 | 12W/5L | 1 pending
+MOMENTUM_15: $+3.10 | 8W/7L | 2 pending
+PREVIOUS_2:  $+6.00 | 9W/6L | 1 pending
+CONSENSUS_2: $+18.75 | 14W/4L | 1 pending
+ARBITRAGE:   $+2.30 | 6W/5L | 3 pending
+TOTAL:     $+49.85 | 74W/48L
+```
+</CodeGroup>
+
+## Advantages of Paper Trading
+
+<CardGroup cols={2}>
+  <Card title="Risk-Free Testing" icon="shield">
+    Test strategies without risking real money
+  </Card>
+  <Card title="Strategy Validation" icon="chart-line">
+    Validate trading logic before going live
+  </Card>
+  <Card title="No API Keys Required" icon="key">
+    Uses public market data only
+  </Card>
+  <Card title="Full History" icon="database">
+    Complete trade history in CSV format
+  </Card>
+</CardGroup>
+
+## Limitations
+
+<Warning>
+Paper trading has important limitations compared to real trading:
+</Warning>
+
+- **No execution risk**: Real orders may not fill at expected prices
+- **No slippage**: Assumes instant execution at market prices
+- **No order book depth**: Doesn't account for available liquidity
+- **Simplified fees**: May not match actual Kalshi fee structure
+
+## Next Steps
+
+<Card title="Real Trading" icon="rocket" href="/concepts/real-trading">
+  Ready to trade with real money? Learn how to deploy the bot with Kalshi API authentication.
+</Card>

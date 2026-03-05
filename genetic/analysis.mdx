@@ -1,0 +1,498 @@
+---
+title: "Analyzing Results"
+description: "Deep analysis of evolution results, gene distributions, and performance patterns"
+---
+
+## Loading Evolution Data
+
+All evolution data is stored in `data/evolution/` as JSON files.
+
+### Load Specific Generation
+
+```python
+import json
+from genetic.genome import Genome
+
+with open("data/evolution/gen_0005.json") as f:
+    data = json.load(f)
+
+print(f"Generation: {data['generation']}")
+print(f"Timestamp: {data['timestamp']}")
+print(f"Population size: {len(data['genomes'])}")
+print(f"Best fitness: {max(data['fitness_scores']):.1f}%")
+```
+
+### Load Hall of Fame
+
+```python
+with open("data/evolution/hall_of_fame.json") as f:
+    hof = json.load(f)
+
+best = hof["best_ever"]
+print(f"Best genome ever: {best['fitness_roi_pct']:.1f}% ROI")
+print(f"From generation: {best['generation']}")
+print(f"Signal type: {best['signal_type']}")
+print(f"Win rate: {best['win_rate']*100:.1f}%")
+print(f"Settled trades: {best['settled_trades']}")
+
+# View all top 20
+for entry in hof["entries"][:10]:
+    print(f"{entry['genome']['id']}: {entry['fitness_roi_pct']:.1f}% - {entry['signal_type']}")
+```
+
+### Load Evolution Timeline
+
+```python
+import glob
+
+gen_files = sorted(glob.glob("data/evolution/gen_*.json"))
+timeline = []
+
+for file in gen_files:
+    with open(file) as f:
+        data = json.load(f)
+    timeline.append({
+        "generation": data["generation"],
+        "timestamp": data["timestamp"],
+        "stats": data["stats"],
+        "fitness_scores": data["fitness_scores"]
+    })
+
+print(f"Loaded {len(timeline)} generations")
+```
+
+## Fitness Analysis
+
+### Fitness Distribution
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+with open("data/evolution/gen_0010.json") as f:
+    data = json.load(f)
+
+fitness = data["fitness_scores"]
+
+# Remove penalty scores for visualization
+valid_fitness = [f for f in fitness if f > -100]
+
+plt.figure(figsize=(10, 6))
+plt.hist(valid_fitness, bins=30, edgecolor='black', alpha=0.7)
+plt.axvline(np.median(valid_fitness), color='r', linestyle='--', label=f'Median: {np.median(valid_fitness):.1f}%')
+plt.axvline(np.mean(valid_fitness), color='g', linestyle='--', label=f'Mean: {np.mean(valid_fitness):.1f}%')
+plt.xlabel('ROI %')
+plt.ylabel('Number of Bots')
+plt.title('Fitness Distribution - Generation 10')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.savefig('fitness_distribution.png')
+```
+
+### Fitness Over Generations
+
+```python
+import matplotlib.pyplot as plt
+
+generations = []
+best_roi = []
+median_roi = []
+mean_roi = []
+worst_roi = []
+
+for gen_data in timeline:
+    generations.append(gen_data["generation"])
+    stats = gen_data["stats"]
+    best_roi.append(stats["best_roi"])
+    median_roi.append(stats["median_roi"])
+    mean_roi.append(stats["mean_roi"])
+    worst_roi.append(stats["worst_roi"])
+
+plt.figure(figsize=(12, 7))
+plt.plot(generations, best_roi, label='Best', marker='o', linewidth=2)
+plt.plot(generations, median_roi, label='Median', marker='s')
+plt.plot(generations, mean_roi, label='Mean', marker='^')
+plt.fill_between(generations, worst_roi, best_roi, alpha=0.2)
+plt.axhline(y=0, color='r', linestyle='--', alpha=0.3)
+plt.xlabel('Generation')
+plt.ylabel('ROI %')
+plt.title('Evolution Progress')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.savefig('evolution_progress.png')
+```
+
+## Gene Analysis
+
+### Gene Value Distributions
+
+Analyze how gene values evolve:
+
+```python
+import pandas as pd
+from genetic.genome import Genome
+
+with open("data/evolution/gen_0010.json") as f:
+    data = json.load(f)
+
+genomes = [Genome.from_dict(g) for g in data["genomes"]]
+fitness = data["fitness_scores"]
+
+# Create DataFrame of gene values
+gene_data = {}
+for gene_name in Genome.gene_names():
+    gene_data[gene_name] = [getattr(g, gene_name) for g in genomes]
+
+df = pd.DataFrame(gene_data)
+df['fitness'] = fitness
+
+# Summary statistics
+print(df.describe())
+
+# Gene correlations with fitness
+correlations = df.corr()['fitness'].sort_values(ascending=False)
+print("\nGene correlations with fitness:")
+print(correlations[1:11])  # Top 10 (excluding fitness itself)
+```
+
+### Signal Type Evolution
+
+```python
+from collections import Counter
+from genetic.genome import decode_genome, SIGNAL_TYPES
+
+# Track signal distribution over generations
+signal_evolution = []
+
+for gen_data in timeline:
+    genomes = [Genome.from_dict(g) for g in gen_data["genomes"]]
+    
+    # Decode signal types
+    signals = []
+    for genome in genomes:
+        params = decode_genome(genome, [])
+        signals.append(params['signal_type'])
+    
+    counts = Counter(signals)
+    signal_evolution.append(counts)
+
+# Plot signal type frequency
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+for signal_type in SIGNAL_TYPES:
+    frequencies = [counts.get(signal_type, 0) for counts in signal_evolution]
+    ax.plot(range(len(signal_evolution)), frequencies, label=signal_type, marker='o')
+
+ax.set_xlabel('Generation')
+ax.set_ylabel('Number of Bots')
+ax.set_title('Signal Type Distribution Over Time')
+ax.legend()
+ax.grid(True, alpha=0.3)
+plt.savefig('signal_evolution.png')
+```
+
+### Top Performers' Genes
+
+```python
+with open("data/evolution/gen_0010.json") as f:
+    data = json.load(f)
+
+genomes = [Genome.from_dict(g) for g in data["genomes"]]
+fitness = data["fitness_scores"]
+
+# Get top 10 genomes
+ranked = sorted(zip(fitness, genomes), key=lambda x: x[0], reverse=True)
+top_10 = ranked[:10]
+
+# Analyze their genes
+for rank, (fit, genome) in enumerate(top_10, 1):
+    params = decode_genome(genome, [])
+    print(f"\nRank {rank}: {fit:.1f}% ROI")
+    print(f"  Signal: {params['signal_type']}")
+    print(f"  Bankroll fraction: {params['bankroll_fraction']*100:.2f}%")
+    print(f"  Max concurrent: {params['max_concurrent']}")
+    print(f"  Side bias: {genome.side_bias:.2f}")
+```
+
+## Performance Patterns
+
+### Win Rate vs ROI
+
+```python
+with open("data/evolution/hall_of_fame.json") as f:
+    hof = json.load(f)
+
+roi = [e['fitness_roi_pct'] for e in hof['entries']]
+win_rates = [e['win_rate'] * 100 for e in hof['entries']]
+
+plt.figure(figsize=(10, 6))
+plt.scatter(win_rates, roi, alpha=0.6, s=100)
+plt.xlabel('Win Rate %')
+plt.ylabel('ROI %')
+plt.title('Win Rate vs ROI (Hall of Fame)')
+plt.grid(True, alpha=0.3)
+
+# Add labels for top 5
+for i in range(min(5, len(roi))):
+    plt.annotate(f"Gen {hof['entries'][i]['generation']}", 
+                 (win_rates[i], roi[i]),
+                 xytext=(5, 5), textcoords='offset points')
+
+plt.savefig('winrate_vs_roi.png')
+```
+
+### Trade Activity Analysis
+
+```python
+with open("data/evolution/hall_of_fame.json") as f:
+    hof = json.load(f)
+
+trades = [e['settled_trades'] for e in hof['entries']]
+roi = [e['fitness_roi_pct'] for e in hof['entries']]
+
+plt.figure(figsize=(10, 6))
+plt.scatter(trades, roi, alpha=0.6, s=100)
+plt.xlabel('Number of Settled Trades')
+plt.ylabel('ROI %')
+plt.title('Trade Volume vs ROI')
+plt.grid(True, alpha=0.3)
+plt.savefig('trades_vs_roi.png')
+```
+
+## Lineage Tracking
+
+Trace the ancestry of successful genomes:
+
+```python
+def build_lineage_tree(genome_id: str, all_generations: list) -> dict:
+    """Build family tree for a genome."""
+    tree = {"id": genome_id, "children": []}
+    
+    # Find this genome
+    for gen_data in all_generations:
+        for genome_dict in gen_data["genomes"]:
+            if genome_dict["id"] == genome_id:
+                tree["generation"] = genome_dict["generation"]
+                tree["parent_ids"] = genome_dict.get("parent_ids", [])
+                
+                # Recursively build parent trees
+                for parent_id in tree["parent_ids"]:
+                    parent_tree = build_lineage_tree(parent_id, all_generations)
+                    tree["children"].append(parent_tree)
+                
+                return tree
+    return tree
+
+# Example: trace lineage of best genome
+with open("data/evolution/hall_of_fame.json") as f:
+    best_id = json.load(f)["best_ever"]["genome"]["id"]
+
+tree = build_lineage_tree(best_id, timeline)
+print(json.dumps(tree, indent=2))
+```
+
+## Diversity Metrics
+
+### Gene Diversity (Entropy)
+
+```python
+import numpy as np
+from scipy.stats import entropy
+
+def calculate_gene_diversity(genomes: list[Genome]) -> dict:
+    """Calculate Shannon entropy for each gene."""
+    diversity = {}
+    
+    for gene_name in Genome.gene_names():
+        values = [getattr(g, gene_name) for g in genomes]
+        # Discretize into 10 bins
+        hist, _ = np.histogram(values, bins=10, range=(0, 1))
+        # Normalize
+        hist = hist / hist.sum()
+        # Calculate entropy
+        diversity[gene_name] = entropy(hist)
+    
+    return diversity
+
+with open("data/evolution/gen_0010.json") as f:
+    genomes = [Genome.from_dict(g) for g in json.load(f)["genomes"]]
+
+diversity = calculate_gene_diversity(genomes)
+print("Gene diversity (higher = more diverse):")
+for gene, div in sorted(diversity.items(), key=lambda x: x[1], reverse=True)[:10]:
+    print(f"  {gene}: {div:.3f}")
+```
+
+### Population Diversity Over Time
+
+```python
+diversity_timeline = []
+
+for gen_data in timeline:
+    genomes = [Genome.from_dict(g) for g in gen_data["genomes"]]
+    diversity = calculate_gene_diversity(genomes)
+    avg_diversity = np.mean(list(diversity.values()))
+    diversity_timeline.append(avg_diversity)
+
+plt.figure(figsize=(10, 6))
+plt.plot(range(len(diversity_timeline)), diversity_timeline, marker='o')
+plt.xlabel('Generation')
+plt.ylabel('Average Gene Diversity (Entropy)')
+plt.title('Population Diversity Over Time')
+plt.grid(True, alpha=0.3)
+plt.savefig('diversity_over_time.png')
+```
+
+## Statistical Tests
+
+### Test if Evolution is Working
+
+```python
+from scipy.stats import ttest_ind
+
+# Compare early vs late generations
+early_fitness = timeline[0]["fitness_scores"]
+late_fitness = timeline[-1]["fitness_scores"]
+
+# Remove penalty scores
+early_valid = [f for f in early_fitness if f > -100]
+late_valid = [f for f in late_fitness if f > -100]
+
+t_stat, p_value = ttest_ind(late_valid, early_valid)
+
+print(f"t-statistic: {t_stat:.3f}")
+print(f"p-value: {p_value:.4f}")
+
+if p_value < 0.05:
+    print("\nSignificant improvement! Evolution is working.")
+else:
+    print("\nNo significant improvement detected.")
+```
+
+## Export Analysis
+
+### Generate Report
+
+```python
+def generate_analysis_report(output_file="evolution_report.md"):
+    """Generate a comprehensive markdown report."""
+    
+    # Load all data
+    gen_files = sorted(glob.glob("data/evolution/gen_*.json"))
+    timeline = [json.load(open(f)) for f in gen_files]
+    hof = json.load(open("data/evolution/hall_of_fame.json"))
+    
+    with open(output_file, "w") as f:
+        f.write("# Evolution Analysis Report\n\n")
+        
+        # Summary
+        f.write(f"## Summary\n\n")
+        f.write(f"- Total generations: {len(timeline)}\n")
+        f.write(f"- Best ROI ever: {hof['best_ever']['fitness_roi_pct']:.1f}%\n")
+        f.write(f"- From generation: {hof['best_ever']['generation']}\n\n")
+        
+        # Recent performance
+        recent = timeline[-1]
+        f.write(f"## Latest Generation ({recent['generation']})\n\n")
+        f.write(f"- Best ROI: {recent['stats']['best_roi']:.1f}%\n")
+        f.write(f"- Median ROI: {recent['stats']['median_roi']:.1f}%\n")
+        f.write(f"- Active bots: {recent['stats']['active_bots']}/100\n")
+        f.write(f"- Total settled: {recent['stats']['total_settled']}\n\n")
+        
+        # Top 10
+        f.write("## Hall of Fame (Top 10)\n\n")
+        f.write("| Rank | Generation | ROI% | Win Rate | Trades | Signal |\n")
+        f.write("|------|-----------|------|----------|--------|--------|\n")
+        for i, entry in enumerate(hof['entries'][:10], 1):
+            f.write(
+                f"| {i} | {entry['generation']} | {entry['fitness_roi_pct']:.1f}% | "
+                f"{entry['win_rate']*100:.1f}% | {entry['settled_trades']} | "
+                f"{entry['signal_type']} |\n"
+            )
+    
+    print(f"Report saved to {output_file}")
+
+generate_analysis_report()
+```
+
+### Export to CSV
+
+```python
+import csv
+
+def export_to_csv(output_file="evolution_data.csv"):
+    """Export all generation stats to CSV."""
+    
+    gen_files = sorted(glob.glob("data/evolution/gen_*.json"))
+    
+    with open(output_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "generation", "timestamp", "best_roi", "median_roi", 
+            "mean_roi", "active_bots", "total_settled", "mean_trades"
+        ])
+        writer.writeheader()
+        
+        for gen_file in gen_files:
+            data = json.load(open(gen_file))
+            writer.writerow({
+                "generation": data["generation"],
+                "timestamp": data["timestamp"],
+                **data["stats"]
+            })
+    
+    print(f"Exported to {output_file}")
+
+export_to_csv()
+```
+
+## Advanced Analysis
+
+### Principal Component Analysis (PCA)
+
+Reduce 22 genes to 2D for visualization:
+
+```python
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+
+with open("data/evolution/gen_0010.json") as f:
+    data = json.load(f)
+
+genomes = [Genome.from_dict(g) for g in data["genomes"]]
+fitness = data["fitness_scores"]
+
+# Create gene matrix
+X = np.array([[getattr(g, gene) for gene in Genome.gene_names()] for g in genomes])
+
+# Apply PCA
+pca = PCA(n_components=2)
+X_pca = pca.fit_transform(X)
+
+# Plot
+plt.figure(figsize=(10, 8))
+scatter = plt.scatter(X_pca[:, 0], X_pca[:, 1], c=fitness, cmap='RdYlGn', s=100, alpha=0.6)
+plt.colorbar(scatter, label='Fitness (ROI%)')
+plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]*100:.1f}% variance)')
+plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]*100:.1f}% variance)')
+plt.title('Genome Space (PCA Projection)')
+plt.grid(True, alpha=0.3)
+plt.savefig('genome_pca.png')
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Monitoring" icon="chart-line" href="/genetic/monitoring">
+    Real-time tracking during evolution
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/genetic/architecture">
+    Understand system design
+  </Card>
+  
+  <Card title="Genome Structure" icon="dna" href="/genetic/genome">
+    Gene definitions and decoding
+  </Card>
+</CardGroup>

@@ -1,0 +1,444 @@
+---
+title: "Fitness Evaluation"
+description: "How bots are scored and ranked based on trading performance"
+---
+
+## Fitness Function
+
+The fitness of each bot is determined by a single primary metric: **Return on Investment (ROI) percentage**.
+
+```python genetic/evolution.py
+def evaluate_fitness(bot: GeneticBot) -> float:
+    """
+    Fitness = ROI (%).
+    Bots with fewer than MIN_SETTLED_TRADES get a large penalty.
+    """
+    acct = bot.account
+    if acct.n_settled < MIN_SETTLED_TRADES:
+        return INACTIVE_FITNESS_PENALTY
+    return acct.roi_pct
+```
+
+## Fitness Calculation
+
+### ROI Formula
+
+```python
+ROI% = (realized_pnl / initial_bankroll) * 100
+```
+
+Where:
+- `realized_pnl` = sum of profits from all **settled** positions
+- `initial_bankroll` = $100 (starting capital)
+
+**Example:**
+- Bot starts with $100
+- Makes 10 trades, 8 settle during the generation
+- Settled trades result in +$15 profit
+- ROI% = (15 / 100) * 100 = **15.0%**
+
+<Note>
+Only **settled** positions count toward fitness. Unsettled positions at generation end are force-closed as losses.
+</Note>
+
+### Activity Penalty
+
+Bots must execute at least **5 settled trades** to receive positive fitness:
+
+```python
+MIN_SETTLED_TRADES = 5
+INACTIVE_FITNESS_PENALTY = -100.0
+```
+
+**Why this matters:**
+- Prevents inactive bots from surviving by luck
+- Forces bots to actively participate in markets
+- Ensures fitness scores reflect genuine trading skill
+
+**Example:**
+- Bot A: 4 settled trades, +20% ROI → Fitness = **-100.0** (penalty)
+- Bot B: 5 settled trades, +20% ROI → Fitness = **+20.0**
+- Bot C: 100 settled trades, -5% ROI → Fitness = **-5.0**
+
+## Account Metrics
+
+The `BotAccount` class tracks all performance data:
+
+### Core Properties
+
+```python genetic/engine.py
+@dataclass
+class BotAccount:
+    initial_bankroll: float = 100.0
+    cash: float  # Available cash
+    open_positions: dict[str, PaperPosition]
+    closed_positions: list[PaperPosition]
+    total_trades: int
+    trades_today: int
+    daily_pnl: float
+```
+
+### Realized Metrics
+
+Based only on **settled** positions:
+
+<CodeGroup>
+```python ROI Percentage
+@property
+def roi_pct(self) -> float:
+    """Realized ROI from settled positions only"""
+    if self.initial_bankroll <= 0:
+        return 0.0
+    return (self.realized_pnl / self.initial_bankroll) * 100
+```
+
+```python Realized PnL
+@property
+def realized_pnl(self) -> float:
+    """Sum of profit from all closed positions"""
+    return sum(p.profit for p in self.closed_positions)
+```
+
+```python Win Rate
+@property
+def win_rate(self) -> float:
+    """Percentage of settled trades that were profitable"""
+    settled = [p for p in self.closed_positions if p.settled]
+    if not settled:
+        return 0.0
+    wins = sum(1 for p in settled if p.profit > 0)
+    return wins / len(settled)
+```
+
+```python Settled Count
+@property
+def n_settled(self) -> int:
+    """Number of settled positions"""
+    return len([p for p in self.closed_positions if p.settled])
+```
+</CodeGroup>
+
+### Unrealized Metrics
+
+Estimates including **open** positions:
+
+<CodeGroup>
+```python Unrealized PnL
+def unrealized_pnl(self, feed: MarketDataFeed) -> float:
+    """Estimate PnL of open positions using current bid prices"""
+    pnl = 0.0
+    for ticker, pos in self.open_positions.items():
+        snap = feed.get_market(ticker)
+        if not snap:
+            continue
+        if pos.side == "yes":
+            current_value = pos.contracts * snap.yes_bid
+        else:
+            current_value = pos.contracts * snap.no_bid
+        pnl += current_value - pos.cost
+    return pnl
+```
+
+```python Total ROI
+def total_roi_pct(self, feed: MarketDataFeed) -> float:
+    """ROI including unrealized positions"""
+    if self.initial_bankroll <= 0:
+        return 0.0
+    total_pnl = self.realized_pnl + self.unrealized_pnl(feed)
+    return (total_pnl / self.initial_bankroll) * 100
+```
+</CodeGroup>
+
+<Warning>
+Unrealized metrics are used for **monitoring only**. Fitness is based solely on realized PnL from settled trades.
+</Warning>
+
+## Signal Performance
+
+Each bot uses one of 5 signal types. Evolution naturally selects the most profitable signals.
+
+### Signal Types
+
+<Accordion title="price_level - Buy in target price range">
+  Buys when ask price falls within genome-specified bounds.
+  
+  ```python genetic/bot.py
+  def _signal_price_level(self, snap: MarketSnapshot) -> tuple[str, float] | None:
+      """Buy when ask is in a specific price range."""
+      p = self.params
+      lo, hi = p["price_threshold_low"], p["price_threshold_high"]
+      if lo <= snap.yes_ask <= hi:
+          return ("yes", snap.yes_ask)
+      if lo <= snap.no_ask <= hi:
+          return ("no", snap.no_ask)
+      return None
+  ```
+  
+  **Use case:** Capture value at specific price points
+</Accordion>
+
+<Accordion title="momentum - Follow price direction">
+  Buys based on recent price trend over lookback window.
+  
+  ```python genetic/bot.py
+  def _signal_momentum(self, snap: MarketSnapshot) -> tuple[str, float] | None:
+      """Buy based on price direction over lookback window."""
+      p = self.params
+      history = self.feed.get_history(snap.ticker)
+      lookback = p["momentum_lookback_ticks"]
+      if len(history) < lookback + 1:
+          return None
+      
+      old_price = history[-(lookback + 1)][1]
+      cur_price = history[-1][1]
+      if old_price == 0:
+          return None
+      
+      pct_change = (cur_price - old_price) / old_price
+      trigger = p["momentum_trigger_pct"]
+      
+      if pct_change > trigger:
+          return ("yes", abs(pct_change))
+      elif pct_change < -trigger:
+          return ("no", abs(pct_change))
+      return None
+  ```
+  
+  **Use case:** Ride trending markets
+</Accordion>
+
+<Accordion title="mean_reversion - Bet on return to average">
+  Buys when price deviates significantly from historical mean.
+  
+  ```python genetic/bot.py
+  def _signal_mean_reversion(self, snap: MarketSnapshot) -> tuple[str, float] | None:
+      """Buy when price deviates from rolling mean by z-score threshold."""
+      p = self.params
+      history = self.feed.get_history(snap.ticker)
+      if len(history) < 10:
+          return None
+      
+      prices = [h[1] for h in history]
+      mean = statistics.mean(prices)
+      stdev = statistics.stdev(prices) if len(prices) > 1 else 0.001
+      if stdev < 0.001:
+          return None
+      
+      z = (prices[-1] - mean) / stdev
+      threshold = p["mean_rev_zscore"]
+      
+      if z > threshold:  # Price way above mean -> expect drop
+          return ("no", abs(z))
+      elif z < -threshold:  # Price way below mean -> expect rise
+          return ("yes", abs(z))
+      return None
+  ```
+  
+  **Use case:** Fade overreactions
+</Accordion>
+
+<Accordion title="value - Buy cheapest side vs fair value">
+  Assumes fair value is 50¢, buys whichever side offers better value.
+  
+  ```python genetic/bot.py
+  def _signal_value(self, snap: MarketSnapshot) -> tuple[str, float] | None:
+      """Buy whichever side is cheapest (edge vs 50/50 fair value)."""
+      p = self.params
+      edge_min = p["value_edge_min"]
+      yes_edge = 0.50 - snap.yes_ask  # Positive if yes is cheap
+      no_edge = 0.50 - snap.no_ask    # Positive if no is cheap
+      if yes_edge > edge_min:
+          return ("yes", yes_edge)
+      if no_edge > edge_min:
+          return ("no", no_edge)
+      return None
+  ```
+  
+  **Use case:** Exploit mispricing vs 50/50 baseline
+</Accordion>
+
+<Accordion title="contrarian - Bet against confident crowd">
+  Fades the market when one side becomes very expensive (confident).
+  
+  ```python genetic/bot.py
+  def _signal_contrarian(self, snap: MarketSnapshot) -> tuple[str, float] | None:
+      """Bet against the crowd when market is very confident."""
+      p = self.params
+      threshold = p["contrarian_threshold"]
+      if snap.yes_ask > threshold:
+          return ("no", snap.yes_ask - threshold)
+      if snap.no_ask > threshold:
+          return ("yes", snap.no_ask - threshold)
+      return None
+  ```
+  
+  **Use case:** Profit from overconfidence
+</Accordion>
+
+## Trading Execution Flow
+
+Every 30 seconds, each bot executes its `tick()` method:
+
+<Steps>
+  <Step title="Check Daily Limits">
+    ```python
+    if acct.trades_today >= params["max_trades_per_day"]:
+        return
+    if acct.daily_pnl <= -(acct.equity * params["daily_loss_limit_pct"]):
+        return
+    if acct.n_open >= params["max_concurrent"]:
+        return
+    ```
+  </Step>
+  
+  <Step title="Get Open Markets">
+    ```python
+    markets = self.feed.get_open_markets()
+    ```
+  </Step>
+  
+  <Step title="Filter Markets">
+    Apply genome filters:
+    - Already have position? Skip
+    - Volume/open interest too low? Skip
+    - Time to expiry outside range? Skip
+    - Category not selected? Skip
+    - Price outside bounds? Skip
+  </Step>
+  
+  <Step title="Generate Signal">
+    ```python
+    signal = self._generate_signal(snap)  # Returns (side, confidence) or None
+    ```
+  </Step>
+  
+  <Step title="Apply Side Bias">
+    ```python
+    side = self._apply_side_bias(signal[0])
+    ```
+  </Step>
+  
+  <Step title="Calculate Position Size">
+    ```python
+    alloc = min(
+        acct.equity * params["bankroll_fraction"],
+        acct.equity * params["max_single_market_pct"],
+        acct.cash
+    )
+    ```
+  </Step>
+  
+  <Step title="Execute Trade">
+    ```python
+    self.engine.try_buy(self.bot_id, ticker, side, alloc)
+    ```
+  </Step>
+</Steps>
+
+## Position Settlement
+
+Positions are closed when markets settle:
+
+```python genetic/engine.py
+def _apply_settlements(self):
+    """Apply any cached settlement data to open positions."""
+    for bot_id, acct in self.accounts.items():
+        to_close: list[str] = []
+        for ticker, pos in acct.open_positions.items():
+            result = self.feed.get_settlement(ticker)
+            if result is None:
+                continue
+            
+            won = result == pos.side
+            pos.settled = True
+            pos.result = result
+            pos.payout = float(pos.contracts) if won else 0.0
+            pos.profit = pos.payout - pos.cost
+            pos.settle_time = datetime.now(timezone.utc)
+            
+            acct.cash += pos.payout
+            acct.daily_pnl += pos.profit
+            acct.closed_positions.append(pos)
+            to_close.append(ticker)
+        
+        for ticker in to_close:
+            del acct.open_positions[ticker]
+```
+
+**Settlement Timeline:**
+
+1. **Trading period** (24h): Continuous settlement checks every 30s
+2. **Targeted checks** (every 5 min): Query API for held positions past close time
+3. **Settlement wait** (up to 4h): Focused polling for remaining positions
+4. **Force close**: Any unsettled positions counted as total losses
+
+<Warning>
+Unsettled positions are penalized heavily. Bots that hold positions in markets that don't settle quickly will have lower fitness.
+</Warning>
+
+## Fitness Selection Pressure
+
+Fitness directly drives evolution through:
+
+### Tournament Selection
+
+When selecting parents for breeding:
+
+```python genetic/evolution.py
+def select_parent(population: list[GeneticBot]) -> GeneticBot:
+    """Tournament selection: pick TOURNAMENT_SIZE random bots, return best."""
+    candidates = random.sample(population, min(TOURNAMENT_SIZE, len(population)))
+    return max(candidates, key=evaluate_fitness)
+```
+
+With `TOURNAMENT_SIZE = 7`, higher fitness bots have ~7x better chance of being selected.
+
+### Elitism
+
+Top 5 bots by fitness survive unchanged:
+
+```python
+ranked = sorted(population, key=evaluate_fitness, reverse=True)
+for bot in ranked[:ELITE_COUNT]:
+    elite = bot.genome.clone()
+    next_gen.append(elite)
+```
+
+## Monitoring Fitness
+
+During evolution, fitness is logged periodically:
+
+```
+[Gen 5 | 12.0h] Active: 87/100 | Open: 45 | Trades: 892 | Settled: 847 | 
+Est ROI: +23.5%/+5.2% | Realized: +18.7%/+4.1%
+
+======================================================================
+GENERATION 5 RESULTS
+======================================================================
+Rank  Bot ID         ROI%   Trades  Settled  WinRate  Signal
+----------------------------------------------------------------------
+1     bot_a3f8c1    +34.2%     18       18    72.2%   mean_reversion
+2     bot_9d2e45    +28.9%     24       23    65.2%   value
+3     bot_7b1a92    +22.1%     15       15    60.0%   momentum
+...
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Selection Mechanisms" icon="trophy" href="/genetic/selection">
+    Tournament selection and elitism details
+  </Card>
+  
+  <Card title="Evolution Operators" icon="shuffle" href="/genetic/operators">
+    Crossover and mutation mechanics
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/genetic/monitoring">
+    Track fitness in real-time
+  </Card>
+  
+  <Card title="Analysis" icon="chart-mixed" href="/genetic/analysis">
+    Analyze fitness trends across generations
+  </Card>
+</CardGroup>

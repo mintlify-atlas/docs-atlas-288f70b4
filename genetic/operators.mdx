@@ -1,0 +1,457 @@
+---
+title: "Genetic Operators"
+description: "Crossover and mutation operators that create genetic diversity"
+---
+
+## Overview
+
+Genetic operators transform parent genomes into offspring for the next generation. The two primary operators are:
+
+1. **Crossover**: Combines genes from two parents
+2. **Mutation**: Randomly perturbs individual genes
+
+## Crossover
+
+Crossover creates a child genome by combining genetic material from two parents.
+
+### Uniform Crossover
+
+The system uses **uniform crossover**: each gene is independently selected from either parent with 50% probability.
+
+```python genetic/evolution.py
+def crossover(parent_a: Genome, parent_b: Genome, gen_num: int) -> Genome:
+    """Uniform crossover: for each gene, randomly pick from parent A or B."""
+    child = Genome(
+        generation=gen_num,
+        parent_ids=[parent_a.id, parent_b.id],
+    )
+    for gene_name in Genome.gene_names():
+        if random.random() < 0.5:
+            setattr(child, gene_name, getattr(parent_a, gene_name))
+        else:
+            setattr(child, gene_name, getattr(parent_b, gene_name))
+    return child
+```
+
+### Example
+
+**Parent A:**
+```python
+Genome(
+    min_volume_24h=0.8,
+    signal_type=0.45,      # mean_reversion
+    bankroll_fraction=0.1,
+    max_concurrent_positions=0.5,
+    # ... 18 more genes
+)
+```
+
+**Parent B:**
+```python
+Genome(
+    min_volume_24h=0.2,
+    signal_type=0.75,      # contrarian
+    bankroll_fraction=0.8,
+    max_concurrent_positions=0.3,
+    # ... 18 more genes
+)
+```
+
+**Possible Child** (random 50/50 mix):
+```python
+Genome(
+    min_volume_24h=0.8,        # from Parent A
+    signal_type=0.75,          # from Parent B -> contrarian
+    bankroll_fraction=0.1,     # from Parent A
+    max_concurrent_positions=0.3,  # from Parent B
+    # ... 18 more genes mixed from both
+)
+```
+
+### Why Uniform Crossover?
+
+<AccordionGroup>
+  <Accordion title="Gene Independence">
+    Trading genes are mostly independent (e.g., signal type doesn't depend on position sizing). Uniform crossover respects this.
+  </Accordion>
+  
+  <Accordion title="Maximum Recombination">
+    Unlike single-point crossover, uniform crossover can create 2^22 ≈ 4 million unique combinations from two parents.
+  </Accordion>
+  
+  <Accordion title="No Positional Bias">
+    All genes have equal chance of being inherited from either parent, regardless of their position in the genome.
+  </Accordion>
+</AccordionGroup>
+
+### Crossover Rate
+
+Crossover is applied probabilistically:
+
+```python genetic/evolution.py
+CROSSOVER_RATE = 0.7
+
+for _ in range(breed_count):
+    parent_a = select_parent(population)
+    
+    if random.random() < CROSSOVER_RATE:  # 70% chance
+        parent_b = select_parent(population)
+        child = crossover(parent_a.genome, parent_b.genome, gen_num)
+    else:  # 30% chance
+        child = parent_a.genome.clone()
+        child.generation = gen_num
+        child.parent_ids = [parent_a.genome.id]
+    
+    child = mutate(child)  # Always mutate
+    next_gen.append(child)
+```
+
+**Breakdown:**
+- **70% of offspring**: Two-parent crossover
+- **30% of offspring**: Single-parent clone
+- **100% of offspring**: Undergo mutation
+
+<Note>
+Cloning (no crossover) preserves successful gene combinations that might be disrupted by recombination.
+</Note>
+
+## Mutation
+
+Mutation introduces random variation by perturbing gene values.
+
+### Gaussian Mutation
+
+Each gene has a `MUTATION_RATE` probability of being modified by adding Gaussian noise:
+
+```python genetic/evolution.py
+MUTATION_RATE = 0.15
+MUTATION_SIGMA = 0.10
+
+def mutate(genome: Genome) -> Genome:
+    """
+    Gaussian mutation: each gene has MUTATION_RATE chance of being
+    perturbed by N(0, MUTATION_SIGMA), clamped to [0, 1].
+    """
+    g = copy.deepcopy(genome)
+    for gene_name in Genome.gene_names():
+        if random.random() < MUTATION_RATE:  # 15% chance per gene
+            old_val = getattr(g, gene_name)
+            delta = random.gauss(0, MUTATION_SIGMA)  # N(0, 0.10)
+            new_val = max(0.0, min(1.0, old_val + delta))
+            setattr(g, gene_name, new_val)
+    return g
+```
+
+### Example
+
+**Before Mutation:**
+```python
+Genome(
+    min_volume_24h=0.500,
+    signal_type=0.450,
+    bankroll_fraction=0.300,
+    # ... 19 more genes
+)
+```
+
+**After Mutation** (example with 3 genes mutated):
+```python
+Genome(
+    min_volume_24h=0.432,  # Mutated: 0.500 + N(0, 0.10) = 0.500 - 0.068
+    signal_type=0.450,     # Not mutated (85% chance)
+    bankroll_fraction=0.412,  # Mutated: 0.300 + 0.112
+    # ... other genes, ~3 more likely mutated
+)
+```
+
+**Expected mutations per genome:**
+```
+22 genes * 0.15 mutation rate = 3.3 genes per genome
+```
+
+### Mutation Distribution
+
+```python
+import random
+
+# Gaussian mutation: N(0, 0.10)
+delta = random.gauss(mu=0, sigma=0.10)
+```
+
+**Distribution characteristics:**
+- **Mean**: 0 (no directional bias)
+- **Stddev**: 0.10
+- **68% of mutations**: within ±0.10 of original value
+- **95% of mutations**: within ±0.20 of original value
+- **99.7% of mutations**: within ±0.30 of original value
+
+**Clamping:**
+```python
+new_val = max(0.0, min(1.0, old_val + delta))
+```
+
+Ensures all genes stay in valid [0.0, 1.0] range.
+
+### Why Gaussian Mutation?
+
+<AccordionGroup>
+  <Accordion title="Small Perturbations Preferred">
+    Most mutations are small (±0.10), allowing fine-tuning of good genomes. Large jumps are rare but possible.
+  </Accordion>
+  
+  <Accordion title="Continuous Optimization">
+    Gaussian noise is ideal for optimizing continuous parameters (all our genes are floats).
+  </Accordion>
+  
+  <Accordion title="Balanced Exploration">
+    Small mutations exploit local neighborhoods. Rare large mutations explore distant regions.
+  </Accordion>
+</AccordionGroup>
+
+## Mutation Rate Tuning
+
+### Impact of Mutation Rate
+
+| Mutation Rate | Genes Mutated/Genome | Effect |
+|---------------|----------------------|--------|
+| 0.01          | 0.22                 | Too conservative, slow adaptation |
+| 0.05          | 1.1                  | Modest changes |
+| 0.15 (default)| 3.3                  | Balanced exploration |
+| 0.30          | 6.6                  | High variation, risks disrupting good genomes |
+| 0.50          | 11                   | Excessive, approaching random search |
+
+### Impact of Mutation Sigma
+
+| Sigma | 95% Confidence Range | Effect |
+|-------|----------------------|--------|
+| 0.05  | ±0.10                 | Very fine tuning |
+| 0.10 (default) | ±0.20          | Balanced local/global search |
+| 0.20  | ±0.40                 | Large jumps, higher diversity |
+| 0.30  | ±0.60                 | Very disruptive |
+
+<Note>
+With sigma=0.10, a gene at 0.50 will stay in [0.30, 0.70] for 95% of mutations.
+</Note>
+
+## Operator Application Pipeline
+
+Here's how operators are applied when creating the next generation:
+
+<Steps>
+  <Step title="Elitism (5 genomes)">
+    ```python
+    # Top 5 copied exactly (no crossover, no mutation)
+    for bot in ranked[:ELITE_COUNT]:
+        elite = bot.genome.clone()
+        next_gen.append(elite)
+    ```
+  </Step>
+  
+  <Step title="Parent Selection (90 genomes)">
+    ```python
+    for _ in range(90):
+        parent_a = select_parent(population)  # Tournament selection
+    ```
+  </Step>
+  
+  <Step title="Crossover (70% rate)">
+    ```python
+        if random.random() < 0.7:
+            parent_b = select_parent(population)
+            child = crossover(parent_a.genome, parent_b.genome, gen_num)
+        else:
+            child = parent_a.genome.clone()
+    ```
+  </Step>
+  
+  <Step title="Mutation (always)">
+    ```python
+        child = mutate(child)  # 15% per gene
+        next_gen.append(child)
+    ```
+  </Step>
+  
+  <Step title="Immigration (5 genomes)">
+    ```python
+    for _ in range(5):
+        next_gen.append(Genome.random(generation=gen_num))
+    ```
+  </Step>
+</Steps>
+
+**Result:** 100 genomes for next generation
+
+## Genetic Diversity
+
+Operators maintain diversity through:
+
+### Crossover Diversity
+
+With 100 parents, potential unique crossover combinations:
+```
+C(100, 2) * 2^22 ≈ 4,950 * 4,194,304 = 20.7 billion combinations
+```
+
+### Mutation Diversity
+
+Each gene can mutate to infinite values (continuous):
+```
+Effective search space per generation = infinite (continuous domain)
+```
+
+### Immigration Diversity
+
+5 random genomes explore completely different regions:
+```
+Random genome probability space = [0,1]^22 (22-dimensional unit hypercube)
+```
+
+## Adaptive Operators
+
+The system uses fixed operator rates, but you can implement adaptive rates:
+
+<CodeGroup>
+```python Adaptive Mutation Rate
+def adaptive_mutation_rate(generation: int, diversity: float) -> float:
+    """
+    Increase mutation when diversity is low.
+    """
+    base_rate = 0.15
+    if diversity < 0.1:  # Low diversity threshold
+        return min(0.30, base_rate * 2)
+    return base_rate
+```
+
+```python Adaptive Crossover Rate
+def adaptive_crossover_rate(fitness_improvement: float) -> float:
+    """
+    Decrease crossover if fitness plateaus.
+    """
+    base_rate = 0.7
+    if fitness_improvement < 0.01:  # Plateau threshold
+        return max(0.4, base_rate - 0.3)
+    return base_rate
+```
+</CodeGroup>
+
+<Warning>
+Adaptive operators add complexity. Start with fixed rates and only optimize if needed.
+</Warning>
+
+## Debugging Operators
+
+### Track Parent IDs
+
+Every genome records its parents:
+
+```python
+@dataclass
+class Genome:
+    id: str
+    generation: int
+    parent_ids: list[str]  # Parent genome IDs
+```
+
+Use this to trace lineages:
+
+```python
+# Elite
+parent_ids = [parent.id]  # Single parent
+
+# Crossover
+parent_ids = [parent_a.id, parent_b.id]  # Two parents
+
+# Immigration
+parent_ids = []  # No parents
+```
+
+### Visualize Genetic Flow
+
+```python
+import json
+
+# Load generation data
+with open("data/evolution/gen_0005.json") as f:
+    data = json.load(f)
+
+for genome_data in data["genomes"]:
+    genome = Genome.from_dict(genome_data)
+    print(f"{genome.id} <- {genome.parent_ids}")
+
+# Output:
+# a3f8c1e2 <- ['9d2e4501']  # Elite or clone
+# 7b1a9234 <- ['a3f8c1e2', '6c5d8f12']  # Crossover
+# 4e9a2b3c <- []  # Immigration
+```
+
+## Operator Configuration
+
+All operator parameters in `config.py`:
+
+```python genetic/config.py
+# Population
+POPULATION_SIZE = 100
+
+# Selection
+ELITE_COUNT = 5
+TOURNAMENT_SIZE = 7
+IMMIGRATION_COUNT = 5
+
+# Crossover
+CROSSOVER_RATE = 0.7
+
+# Mutation
+MUTATION_RATE = 0.15     # Per-gene probability
+MUTATION_SIGMA = 0.10    # Gaussian stddev
+```
+
+## Operator Testing
+
+Test operators in isolation:
+
+```python
+from genetic.genome import Genome
+from genetic.evolution import crossover, mutate
+
+# Test crossover
+parent_a = Genome.random()
+parent_b = Genome.random()
+child = crossover(parent_a, parent_b, generation=1)
+
+# Verify each gene came from one parent
+for gene in Genome.gene_names():
+    val = getattr(child, gene)
+    assert val == getattr(parent_a, gene) or val == getattr(parent_b, gene)
+
+# Test mutation
+original = Genome.random()
+mutated = mutate(original)
+
+# Count mutations
+differences = sum(
+    1 for gene in Genome.gene_names()
+    if getattr(original, gene) != getattr(mutated, gene)
+)
+
+print(f"Mutated {differences}/22 genes")  # Expect ~3.3 on average
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Selection Mechanisms" icon="trophy" href="/genetic/selection">
+    How parents are chosen for breeding
+  </Card>
+  
+  <Card title="Genome Structure" icon="dna" href="/genetic/genome">
+    Understanding the 22 genes
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/genetic/monitoring">
+    Track operator effectiveness
+  </Card>
+  
+  <Card title="Analysis" icon="chart-mixed" href="/genetic/analysis">
+    Measure diversity and convergence
+  </Card>
+</CardGroup>

@@ -1,0 +1,350 @@
+---
+title: "GeneticBot"
+description: "Individual bot that uses a genome to make autonomous trading decisions"
+---
+
+## Overview
+
+The `GeneticBot` class represents a single bot in the evolutionary population. It decodes its genome into trading parameters and executes trades based on its strategy.
+
+## GeneticBot Class
+
+### Constructor
+
+<ParamField path="genome" type="Genome" required>
+  The bot's genetic strategy
+</ParamField>
+
+<ParamField path="feed" type="MarketDataFeed" required>
+  Shared market data feed
+</ParamField>
+
+<ParamField path="engine" type="PaperTradingEngine" required>
+  Paper trading engine
+</ParamField>
+
+<ParamField path="known_categories" type="list[str]" required>
+  Available market categories
+</ParamField>
+
+<ParamField path="bankroll" type="float" default="100.0">
+  Initial capital
+</ParamField>
+
+```python
+from genetic.bot import GeneticBot
+from genetic.genome import Genome
+from genetic.feed import MarketDataFeed
+from genetic.engine import PaperTradingEngine
+from kalshi_client import KalshiClient
+
+client = KalshiClient()
+feed = MarketDataFeed(client)
+engine = PaperTradingEngine(feed)
+
+genome = Genome.random()
+categories = ["Finance", "Politics", "Economics"]
+
+bot = GeneticBot(genome, feed, engine, categories, bankroll=100.0)
+print(f"Bot {bot.bot_id} created")
+print(f"Strategy: {bot.params['signal_type']}")
+```
+
+### Attributes
+
+<ParamField path="genome" type="Genome">
+  Bot's genome (read-only during lifetime)
+</ParamField>
+
+<ParamField path="feed" type="MarketDataFeed">
+  Reference to shared market feed
+</ParamField>
+
+<ParamField path="engine" type="PaperTradingEngine">
+  Reference to paper trading engine
+</ParamField>
+
+<ParamField path="params" type="dict">
+  Decoded trading parameters from genome
+</ParamField>
+
+<ParamField path="bot_id" type="string">
+  Unique bot identifier: f"bot_{genome.id}"
+</ParamField>
+
+<ParamField path="account" type="BotAccount">
+  Bot's paper trading account
+</ParamField>
+
+## Main Methods
+
+### tick()
+
+Execute one trading cycle. Called every `TICK_INTERVAL_SECONDS`.
+
+**Process:**
+1. Check daily limits (trades, loss cap)
+2. Check position limits
+3. Scan all open markets
+4. Apply market filters
+5. Generate trading signals
+6. Execute trades with position sizing
+
+```python
+# Main evolution loop
+for tick in range(num_ticks):
+    feed.update()  # Refresh market data
+    
+    for bot in population:
+        bot.tick()  # Each bot evaluates and trades
+    
+    engine.settle_markets()  # Check for settlements
+```
+
+## Market Filtering
+
+### _passes_market_filter(snap)
+
+Check if a market passes this bot's filter criteria.
+
+<ParamField path="snap" type="MarketSnapshot" required>
+  Market snapshot to evaluate
+</ParamField>
+
+<ResponseField name="passes" type="bool">
+  True if market passes all filters
+</ResponseField>
+
+**Filters applied:**
+- Volume 24h ≥ `min_volume_24h` (if available)
+- Open interest ≥ `min_open_interest` (if available)
+- Category in `categories` list
+- Time to expiry between `min_time_to_expiry_hrs` and `max_time_to_expiry_hrs`
+- At least one side's ask price in range [`min_price`, `max_price`]
+
+```python
+# Example usage (internal)
+for ticker, snap in markets.items():
+    if not bot._passes_market_filter(snap):
+        continue
+    # ... generate signal
+```
+
+## Signal Generation
+
+### _generate_signal(snap)
+
+Generate trading signal for a market based on signal_type.
+
+<ParamField path="snap" type="MarketSnapshot" required>
+  Market to analyze
+</ParamField>
+
+<ResponseField name="signal" type="tuple[str, float] | None">
+  Returns (side, confidence) or None if no signal
+</ResponseField>
+
+**Signal types:**
+- `price_level`: Buy when ask in specific range
+- `momentum`: Buy based on price direction
+- `mean_reversion`: Buy on z-score deviation
+- `value`: Buy cheap side vs fair value
+- `contrarian`: Bet against crowd
+
+```python
+signal = bot._generate_signal(market_snap)
+if signal:
+    side, confidence = signal
+    print(f"Signal: {side} (confidence: {confidence:.2f})")
+```
+
+### Signal Strategies
+
+#### _signal_price_level(snap)
+
+Buy when ask price falls in configured range.
+
+```python
+# Example: Buy yes if price between $0.30-$0.70
+if price_threshold_low <= yes_ask <= price_threshold_high:
+    return ("yes", yes_ask)
+```
+
+#### _signal_momentum(snap)
+
+Buy based on price direction over lookback window.
+
+<ParamField path="momentum_lookback_ticks" type="int">
+  Number of ticks to look back
+</ParamField>
+
+<ParamField path="momentum_trigger_pct" type="float">
+  Minimum % change to trigger signal
+</ParamField>
+
+```python
+# Example: If price up 5% over 30 ticks, buy yes
+if pct_change > momentum_trigger_pct:
+    return ("yes", abs(pct_change))
+elif pct_change < -momentum_trigger_pct:
+    return ("no", abs(pct_change))
+```
+
+#### _signal_mean_reversion(snap)
+
+Buy when price deviates from rolling mean.
+
+<ParamField path="mean_rev_zscore" type="float">
+  Z-score threshold (e.g., 2.0 = 2 std devs)
+</ParamField>
+
+```python
+# Example: If price 2 std devs above mean, expect drop
+if z > mean_rev_zscore:
+    return ("no", abs(z))  # Price too high
+elif z < -mean_rev_zscore:
+    return ("yes", abs(z))  # Price too low
+```
+
+#### _signal_value(snap)
+
+Buy whichever side is cheaper vs 50/50 fair value.
+
+<ParamField path="value_edge_min" type="float">
+  Minimum edge required (e.g., 0.15 = 15 cent discount)
+</ParamField>
+
+```python
+# Example: If yes trading at $0.35, edge = $0.15
+yes_edge = 0.50 - yes_ask
+if yes_edge > value_edge_min:
+    return ("yes", yes_edge)
+```
+
+#### _signal_contrarian(snap)
+
+Bet against the crowd when market is very confident.
+
+<ParamField path="contrarian_threshold" type="float">
+  Confidence threshold (e.g., 0.80 = 80%)
+</ParamField>
+
+```python
+# Example: If yes at $0.85, bet no (crowd overconfident)
+if yes_ask > contrarian_threshold:
+    return ("no", yes_ask - contrarian_threshold)
+```
+
+## Side Selection
+
+### _apply_side_bias(signal_side)
+
+Apply genome-encoded directional bias to signal.
+
+<ParamField path="signal_side" type="string" required>
+  Original signal side ("yes" or "no")
+</ParamField>
+
+<ResponseField name="final_side" type="string">
+  Final side after bias application
+</ResponseField>
+
+**Logic:**
+- `side_bias < 0.2`: Always return "no"
+- `side_bias > 0.8`: Always return "yes"
+- `0.2 ≤ side_bias ≤ 0.8`: Follow signal with possible flip
+
+```python
+# Example: 15% chance to flip side
+if random.random() < side_flip_prob:
+    return opposite_of(signal_side)
+return signal_side
+```
+
+## Position Sizing
+
+Position sizing uses Kelly-like fractional bankroll approach:
+
+```python
+# Target allocation
+alloc = acct.equity * params['bankroll_fraction']
+
+# Cap to max single market allocation
+max_alloc = acct.equity * params['max_single_market_pct']
+alloc = min(alloc, max_alloc)
+
+# Can't exceed available cash
+alloc = min(alloc, acct.cash)
+
+# Execute
+engine.try_buy(bot_id, ticker, side, alloc)
+```
+
+## Risk Controls
+
+Bots enforce multiple risk limits:
+
+```python
+# Daily trade limit
+if acct.trades_today >= params['max_trades_per_day']:
+    return  # Stop trading for today
+
+# Daily loss limit
+if acct.daily_pnl <= -(acct.equity * params['daily_loss_limit_pct']):
+    return  # Stop trading for today
+
+# Position limit
+if acct.n_open >= params['max_concurrent']:
+    return  # No more concurrent positions
+```
+
+## Example: Bot Lifecycle
+
+```python
+from genetic.bot import GeneticBot
+from genetic.genome import Genome
+from genetic.feed import MarketDataFeed
+from genetic.engine import PaperTradingEngine
+from kalshi_client import KalshiClient
+import time
+
+# Setup
+client = KalshiClient()
+feed = MarketDataFeed(client)
+engine = PaperTradingEngine(feed)
+
+# Create bot with momentum strategy
+genome = Genome.random()
+genome.signal_type = 0.2  # Momentum strategy
+genome.bankroll_fraction = 0.02  # 2% per trade
+genome.max_concurrent_positions = 0.25  # ~5 positions
+
+bot = GeneticBot(genome, feed, engine, ["Finance"], bankroll=100.0)
+
+print(f"Bot {bot.bot_id} starting")
+print(f"Strategy: {bot.params['signal_type']}")
+print(f"Bankroll: ${bot.account.cash:.2f}")
+
+# Run for 100 ticks
+for tick in range(100):
+    feed.update()
+    bot.tick()
+    
+    if tick % 10 == 0:
+        acct = bot.account
+        print(f"Tick {tick}: {acct.n_open} open, {acct.n_settled} settled, "
+              f"ROI: {acct.roi_pct:+.2f}%")
+    
+    time.sleep(30)  # 30 second ticks
+
+# Final stats
+engine.settle_with_targeted_check()
+acct = bot.account
+
+print(f"\nFinal Results:")
+print(f"  Total trades: {acct.total_trades}")
+print(f"  Settled: {acct.n_settled}")
+print(f"  Win rate: {acct.win_rate:.1%}")
+print(f"  Realized P&L: ${acct.realized_pnl:+.2f}")
+print(f"  ROI: {acct.roi_pct:+.2f}%")
+```

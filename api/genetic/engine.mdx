@@ -1,0 +1,433 @@
+---
+title: "Paper Trading Engine"
+description: "Paper trading simulation engine with market fill logic and position tracking"
+---
+
+## Overview
+
+The `engine.py` module provides a paper trading engine that simulates order fills using real market data. It manages bot accounts, positions, and settlement without making actual trades.
+
+## PaperPosition Class
+
+Represents a single open or settled paper position.
+
+### Fields
+
+<ParamField path="id" type="string">
+  Unique 12-character position ID (auto-generated)
+</ParamField>
+
+<ParamField path="bot_id" type="string">
+  ID of the bot that owns this position
+</ParamField>
+
+<ParamField path="market_ticker" type="string">
+  Market ticker symbol
+</ParamField>
+
+<ParamField path="side" type="string">
+  "yes" or "no"
+</ParamField>
+
+<ParamField path="contracts" type="int">
+  Number of contracts purchased
+</ParamField>
+
+<ParamField path="entry_price" type="float">
+  Price paid per contract in dollars
+</ParamField>
+
+<ParamField path="cost" type="float">
+  Total cost: contracts × entry_price
+</ParamField>
+
+<ParamField path="entry_time" type="datetime">
+  When position was opened
+</ParamField>
+
+<ParamField path="close_time" type="datetime | None">
+  Market close time (for settlement scheduling)
+</ParamField>
+
+<ParamField path="settled" type="bool" default="False">
+  Whether position has been settled
+</ParamField>
+
+<ParamField path="result" type="string">
+  Market outcome: "yes", "no", or "timeout"
+</ParamField>
+
+<ParamField path="payout" type="float">
+  Payout from winning contracts (0 if lost)
+</ParamField>
+
+<ParamField path="profit" type="float">
+  Net profit: payout - cost
+</ParamField>
+
+<ParamField path="settle_time" type="datetime | None">
+  When position was settled
+</ParamField>
+
+```python
+from genetic.engine import PaperPosition
+from datetime import datetime, timezone
+
+position = PaperPosition(
+    bot_id="bot_abc123",
+    market_ticker="KXBTC15M-24DEC05-T1030",
+    side="yes",
+    contracts=10,
+    entry_price=0.55,
+    cost=5.50,
+    close_time=datetime.now(timezone.utc)
+)
+
+print(f"Position: {position.contracts} {position.side} @ ${position.entry_price}")
+print(f"Cost: ${position.cost:.2f}")
+```
+
+## BotAccount Class
+
+Paper trading account for one bot with P&L tracking.
+
+### Fields
+
+<ParamField path="bot_id" type="string" required>
+  Bot identifier
+</ParamField>
+
+<ParamField path="initial_bankroll" type="float" default="100.0">
+  Starting capital
+</ParamField>
+
+<ParamField path="cash" type="float" default="100.0">
+  Available cash for new trades
+</ParamField>
+
+<ParamField path="open_positions" type="dict[str, PaperPosition]">
+  Dict of ticker → position for open positions
+</ParamField>
+
+<ParamField path="closed_positions" type="list[PaperPosition]">
+  List of settled positions
+</ParamField>
+
+<ParamField path="total_trades" type="int" default="0">
+  Lifetime trade count
+</ParamField>
+
+<ParamField path="trades_today" type="int" default="0">
+  Trades executed today (resets daily)
+</ParamField>
+
+<ParamField path="daily_pnl" type="float" default="0.0">
+  Today's realized P&L (resets daily)
+</ParamField>
+
+<ParamField path="last_trade_date" type="string">
+  Last trade date YYYY-MM-DD for daily reset
+</ParamField>
+
+### Properties
+
+#### equity
+
+Total account value: cash + open position costs.
+
+```python
+acct = BotAccount(bot_id="bot_123", initial_bankroll=100.0)
+print(f"Equity: ${acct.equity:.2f}")
+```
+
+#### realized_pnl
+
+Sum of all settled position profits.
+
+```python
+print(f"Realized P&L: ${acct.realized_pnl:+.2f}")
+```
+
+#### roi_pct
+
+Return on investment percentage based on realized P&L.
+
+```python
+print(f"ROI: {acct.roi_pct:+.2f}%")
+```
+
+#### win_rate
+
+Percentage of settled positions that were profitable.
+
+```python
+print(f"Win rate: {acct.win_rate:.1%}")
+```
+
+#### n_settled
+
+Number of settled positions.
+
+```python
+print(f"Settled trades: {acct.n_settled}")
+```
+
+#### n_open
+
+Number of currently open positions.
+
+```python
+print(f"Open positions: {acct.n_open}")
+```
+
+### Methods
+
+#### unrealized_pnl(feed)
+
+Estimate P&L of open positions using current bid prices.
+
+<ParamField path="feed" type="MarketDataFeed" required>
+  Market data feed for current prices
+</ParamField>
+
+<ResponseField name="pnl" type="float">
+  Unrealized profit/loss
+</ResponseField>
+
+```python
+unrealized = acct.unrealized_pnl(feed)
+print(f"Unrealized P&L: ${unrealized:+.2f}")
+```
+
+#### total_pnl(feed)
+
+Realized + unrealized P&L.
+
+```python
+total = acct.total_pnl(feed)
+print(f"Total P&L: ${total:+.2f}")
+```
+
+#### total_roi_pct(feed)
+
+ROI including unrealized positions.
+
+```python
+roi = acct.total_roi_pct(feed)
+print(f"Total ROI: {roi:+.2f}%")
+```
+
+## PaperTradingEngine Class
+
+Simulates fills locally using real market data.
+
+### Constructor
+
+<ParamField path="feed" type="MarketDataFeed" required>
+  Market data feed instance
+</ParamField>
+
+```python
+from genetic.engine import PaperTradingEngine
+from genetic.feed import MarketDataFeed
+from kalshi_client import KalshiClient
+
+client = KalshiClient()
+feed = MarketDataFeed(client)
+engine = PaperTradingEngine(feed)
+```
+
+### Methods
+
+#### create_account(bot_id, bankroll=100.0)
+
+Create a new paper trading account for a bot.
+
+<ParamField path="bot_id" type="string" required>
+  Unique bot identifier
+</ParamField>
+
+<ParamField path="bankroll" type="float" default="100.0">
+  Initial capital in USD
+</ParamField>
+
+<ResponseField name="account" type="BotAccount">
+  New account instance
+</ResponseField>
+
+```python
+acct = engine.create_account("bot_abc123", bankroll=100.0)
+print(f"Created account with ${acct.cash:.2f} cash")
+```
+
+#### try_buy(bot_id, market_ticker, side, usd_amount)
+
+Attempt to buy a position. Returns position if successful, None if rejected.
+
+<ParamField path="bot_id" type="string" required>
+  Bot account ID
+</ParamField>
+
+<ParamField path="market_ticker" type="string" required>
+  Market to trade
+</ParamField>
+
+<ParamField path="side" type="string" required>
+  "yes" or "no"
+</ParamField>
+
+<ParamField path="usd_amount" type="float" required>
+  Target USD amount to invest
+</ParamField>
+
+<ResponseField name="position" type="PaperPosition | None">
+  Created position, or None if rejected
+</ResponseField>
+
+**Fill logic:**
+1. Fill at displayed ask price (yes_ask or no_ask)
+2. Calculate integer contracts only
+3. Check available cash
+4. No duplicate positions in same market
+
+```python
+position = engine.try_buy(
+    bot_id="bot_abc123",
+    market_ticker="KXBTC15M-24DEC05-T1030",
+    side="yes",
+    usd_amount=10.0
+)
+
+if position:
+    print(f"Bought {position.contracts} @ ${position.entry_price:.2f}")
+    print(f"Total cost: ${position.cost:.2f}")
+else:
+    print("Order rejected (no cash, bad price, or duplicate)")
+```
+
+#### get_open_tickers()
+
+Get all unique tickers with open positions across all accounts.
+
+<ResponseField name="tickers" type="set[str]">
+  Set of market tickers
+</ResponseField>
+
+```python
+tickers = engine.get_open_tickers()
+print(f"Open positions in {len(tickers)} markets")
+```
+
+#### get_closeable_tickers()
+
+Get tickers whose markets have passed their close time.
+
+<ResponseField name="tickers" type="set[str]">
+  Set of closeable market tickers
+</ResponseField>
+
+```python
+closeable = engine.get_closeable_tickers()
+if closeable:
+    print(f"Markets ready to settle: {closeable}")
+```
+
+#### total_open_positions()
+
+Total open positions across all accounts.
+
+<ResponseField name="count" type="int">
+  Number of open positions
+</ResponseField>
+
+```python
+open_count = engine.total_open_positions()
+print(f"{open_count} total open positions")
+```
+
+#### total_settled()
+
+Total settled positions across all accounts.
+
+<ResponseField name="count" type="int">
+  Number of settled positions
+</ResponseField>
+
+```python
+settled_count = engine.total_settled()
+print(f"{settled_count} settled positions")
+```
+
+#### settle_markets()
+
+Check all open positions against cached settlement data.
+
+Called each tick by main loop. Uses cached results from feed.
+
+```python
+# Each tick
+engine.settle_markets()
+```
+
+#### settle_with_targeted_check()
+
+Check specific closeable tickers via API, then settle.
+
+More efficient - only checks markets that are ready to settle.
+
+```python
+# Every N ticks
+engine.settle_with_targeted_check()
+```
+
+#### force_close_remaining()
+
+Force-close all open positions as total losses.
+
+Called after settlement timeout. Treats unsettled positions as losses for fitness calculation.
+
+```python
+# After generation ends + settlement wait period
+engine.force_close_remaining()
+print(f"Forced closure of {engine.total_open_positions()} positions")
+```
+
+## Example: Full Trading Cycle
+
+```python
+from genetic.engine import PaperTradingEngine
+from genetic.feed import MarketDataFeed
+from kalshi_client import KalshiClient
+import time
+
+# Setup
+client = KalshiClient()
+feed = MarketDataFeed(client)
+engine = PaperTradingEngine(feed)
+
+# Create bot account
+acct = engine.create_account("bot_test", bankroll=100.0)
+print(f"Starting bankroll: ${acct.cash:.2f}")
+
+# Update market data
+feed.update()
+
+# Place some trades
+for ticker in list(feed.get_open_markets().keys())[:3]:
+    pos = engine.try_buy("bot_test", ticker, "yes", 10.0)
+    if pos:
+        print(f"Opened: {ticker} {pos.contracts} @ ${pos.entry_price:.2f}")
+
+print(f"\nCash after trades: ${acct.cash:.2f}")
+print(f"Open positions: {acct.n_open}")
+print(f"Equity: ${acct.equity:.2f}")
+
+# Wait and settle
+time.sleep(60)
+engine.settle_with_targeted_check()
+
+print(f"\nSettled positions: {acct.n_settled}")
+print(f"Win rate: {acct.win_rate:.1%}")
+print(f"Realized P&L: ${acct.realized_pnl:+.2f}")
+print(f"ROI: {acct.roi_pct:+.2f}%")
+```

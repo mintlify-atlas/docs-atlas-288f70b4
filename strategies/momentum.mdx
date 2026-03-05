@@ -1,0 +1,280 @@
+---
+title: "MOMENTUM Strategy"
+description: "Directional trading based on Bitcoin spot price movement over a 60-second window"
+---
+
+The **MOMENTUM** strategy trades based on the actual direction of Bitcoin's spot price over the last 60 seconds. Unlike PREVIOUS which relies on past market outcomes, MOMENTUM looks directly at BTC price changes from Coinbase to predict the next 15-minute move.
+
+## Strategy Logic
+
+The hypothesis: recent short-term price momentum (60 seconds) indicates the likely direction for the next 15-minute market window.
+
+- If BTC price **increased** over the last 60 seconds → Bet **YES** (price will go up)
+- If BTC price **decreased** over the last 60 seconds → Bet **NO** (price will go down)
+
+### Signal Generation
+
+<Steps>
+  <Step title="Collect Price History">
+    Bot continuously polls Coinbase API every 5 seconds and stores BTC prices in a time-series buffer.
+  </Step>
+  
+  <Step title="Detect Market Rollover">
+    When a new KXBTC15M market opens, activate MOMENTUM signal generation.
+  </Step>
+  
+  <Step title="Compare Prices">
+    Look back 60 seconds in the price buffer and compare old price vs. current price.
+  </Step>
+  
+  <Step title="Execute Trade">
+    - If `current > old` → Buy YES
+    - If `current ≤ old` → Buy NO
+  </Step>
+</Steps>
+
+## Implementation
+
+### BTC Price Collection
+
+The bot maintains a rolling window of BTC prices:
+
+```python
+# bot.py:34-41
+def get_btc_price():
+    """Get current BTC price from Coinbase."""
+    resp = requests.get(
+        "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+        timeout=10
+    )
+    resp.raise_for_status()
+    return float(resp.json()["data"]["amount"])
+```
+
+Prices are stored with timestamps:
+
+```python
+# bot.py:288-294
+try:
+    btc_price = get_btc_price()
+    btc_prices.append((now, btc_price))  # deque of (timestamp, price)
+except Exception as e:
+    btc_price = None
+    print(f"  [BTC price error: {e}]")
+```
+
+### Momentum Calculation
+
+Here's the core MOMENTUM strategy from `bot.py`:
+
+```python
+# bot.py:416-462
+if (
+    pending_previous
+    and ("MOMENTUM", ticker) not in traded_keys
+    and len(btc_prices) >= 2
+):
+    # Get price from ~60 seconds ago
+    cutoff = now - timedelta(seconds=MOMENTUM_WINDOW_SECONDS)
+    old_prices = [(t, p) for t, p in btc_prices if t <= cutoff]
+    
+    if old_prices:
+        _, old_price = old_prices[-1]
+        _, current_price = btc_prices[-1]
+        
+        if current_price > old_price:
+            side = "yes"  # Price rising, bet UP
+        else:
+            side = "no"   # Price falling, bet DOWN
+        
+        # Record signal
+        signals[ticker]["MOMENTUM"] = side
+        
+        price = yes_ask if side == "yes" else no_ask
+        contracts = STAKE_USD / price if price > 0 else 0
+        pct_change = ((current_price - old_price) / old_price) * 100
+        
+        trade = {
+            "time": now.isoformat(),
+            "strategy": "MOMENTUM",
+            "previous_ticker": pending_previous,
+            "previous_result": f"BTC {pct_change:+.3f}%",
+            "buy_ticker": ticker,
+            "buy_side": side,
+            "stake_usd": STAKE_USD,
+            "price_usd": round(price, 4),
+            "contracts": round(contracts, 4),
+            "outcome": "",
+            "payout_usd": "",
+            "profit_usd": "",
+        }
+        trades.append(trade)
+        save_trades(trades)
+        traded_keys.add(("MOMENTUM", ticker))
+        
+        direction = "UP" if side == "yes" else "DOWN"
+        print(f"  -> [MOMENTUM] BTC {pct_change:+.3f}% -> BUY {side} ({direction}) ${STAKE_USD} @ ${price:.4f}")
+```
+
+## Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MOMENTUM_WINDOW_SECONDS` | `60` | Lookback period for price comparison |
+| `STAKE_USD` | `5.0` | Fixed amount to bet |
+| `POLL_SECONDS` | `5` | Price polling frequency |
+
+<Tip>
+The `btc_prices` deque has `maxlen=btc_history_len` (calculated based on the longest momentum window needed). Older prices are automatically evicted.
+</Tip>
+
+## Risk Characteristics
+
+### Advantages
+
+<Icon icon="check" iconType="solid" /> **Real-time data**: Uses actual BTC price, not lagging market outcomes
+
+<Icon icon="check" iconType="solid" /> **Short lookback**: 60-second window captures recent momentum
+
+<Icon icon="check" iconType="solid" /> **Independent signal**: Doesn't depend on previous market settlement
+
+### Limitations
+
+<Icon icon="xmark" iconType="solid" /> **Noise sensitivity**: 60 seconds may capture random fluctuations rather than true trends
+
+<Icon icon="xmark" iconType="solid" /> **No mean reversion awareness**: Doesn't account for overbought/oversold conditions
+
+<Icon icon="xmark" iconType="solid" /> **Fixed stake**: No position sizing or risk management
+
+## When to Use
+
+MOMENTUM performs best during:
+
+- **High volatility periods**: When BTC is making rapid directional moves
+- **News-driven markets**: Immediate reaction to announcements or events
+- **Intraday trending**: When short-term momentum persists across 15-minute windows
+
+<Warning>
+MOMENTUM can struggle during:
+- **Choppy/ranging markets**: Frequent direction changes cause whipsaws
+- **Low volatility**: Small 60-second moves may not predict 15-minute outcomes
+- **Execution delays**: If price changes significantly between signal and execution
+</Warning>
+
+## MOMENTUM_15 Variant
+
+The **MOMENTUM_15** strategy extends the lookback to the full 15-minute window:
+
+```python
+# From momentum_15.py:406-420
+cutoff = now - timedelta(seconds=MOMENTUM_15_WINDOW_SECONDS)  # 900 seconds
+old_prices = [(t, p) for t, p in btc_prices if t <= cutoff]
+
+if not old_prices:
+    print(
+        f"  Waiting for full {MOMENTUM_15_WINDOW_SECONDS}s BTC history "
+        f"before trading {ticker}"
+    )
+    time.sleep(POLL_SECONDS)
+    continue
+
+_, old_price = old_prices[-1]
+_, current_price = btc_prices[-1]
+side = "yes" if current_price > old_price else "no"
+pct_change = ((current_price - old_price) / old_price) * 100
+```
+
+<Note>
+**MOMENTUM_15** uses `MOMENTUM_15_WINDOW_SECONDS = 15 * 60 = 900 seconds` (from `bot.py:19`). This aligns the signal lookback with the actual market duration.
+</Note>
+
+### MOMENTUM vs MOMENTUM_15
+
+| Aspect | MOMENTUM | MOMENTUM_15 |
+|--------|----------|-------------|
+| Lookback | 60 seconds | 900 seconds (15 min) |
+| Latency | Low (data usually ready) | Higher (needs 15min history) |
+| Signal type | Short-term momentum | Trend alignment |
+| Best for | Quick reversals | Sustained trends |
+
+## Example Trade Flow
+
+<Steps>
+  <Step title="Price collection">
+    At 12:00:00, BTC = $95,000
+    At 12:01:00, BTC = $95,450 (+0.47%)
+  </Step>
+  
+  <Step title="New market opens">
+    KXBTC15M-B opens at 12:01:05
+  </Step>
+  
+  <Step title="MOMENTUM signal generation">
+    Compare current ($95,450) vs 60s ago ($95,000)
+    - Price increased → Signal = YES
+  </Step>
+  
+  <Step title="Execute trade">
+    Buy YES at ask price $0.48
+    - Stake: $5.00
+    - Contracts: 10.42 (= $5.00 / $0.48)
+  </Step>
+  
+  <Step title="Market settles">
+    If BTC continues up and settles YES:
+    - Payout: $10.42
+    - Profit: $5.42
+  </Step>
+</Steps>
+
+## Performance Monitoring
+
+Bot console output shows MOMENTUM P&L:
+
+```bash
+[12:34:56] KXBTC15M-24MAR05-T1245 (180s) | yes=$0.52 no=$0.48 | BTC=95,234 | 
+           P:$+2.50 M:$-1.20 C:$+3.75 M15:$+4.10 ...
+```
+
+Where:
+- `M:$-1.20` = MOMENTUM strategy cumulative P&L
+- `M15:$+4.10` = MOMENTUM_15 strategy cumulative P&L
+
+Detailed trade log:
+
+```bash
+-> [MOMENTUM] BTC +0.245% -> BUY yes (UP) $5.00 @ $0.4800
+** [MOMENTUM] SETTLED KXBTC15M-24MAR05-T1230: WIN $+5.42
+```
+
+## Standalone Bot
+
+MOMENTUM_15 has its own standalone implementation in `momentum_15.py` for isolated testing:
+
+```python
+# momentum_15.py:266-273
+print("=" * 60)
+print("MOMENTUM_15 STRATEGY BOT - REAL TRADING")
+print("=" * 60)
+print(f"Series: {SERIES_TICKER}")
+print(f"Stake: ${STAKE_USD} per trade")
+print(f"Momentum window: {MOMENTUM_15_WINDOW_SECONDS}s")
+print(f"Poll interval: {POLL_SECONDS}s")
+print(f"DRY RUN: {dry_run}")
+```
+
+<Tip>
+Use `momentum_15.py` with `DRY_RUN=true` to backtest the 15-minute momentum signal without risking capital.
+</Tip>
+
+## Related Strategies
+
+<CardGroup cols={2}>
+  <Card title="PREVIOUS Strategy" icon="clock-rotate-left" href="/strategies/previous">
+    Compare market-outcome signals vs. price-based signals
+  </Card>
+  
+  <Card title="CONSENSUS Strategy" icon="handshake" href="/strategies/consensus">
+    Combines MOMENTUM with PREVIOUS for confirmation
+  </Card>
+</CardGroup>

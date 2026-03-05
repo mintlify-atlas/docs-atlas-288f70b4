@@ -1,0 +1,391 @@
+---
+title: "Genetic Algorithm Configuration"
+description: "All configuration constants for the genetic trading system"
+---
+
+## Overview
+
+The genetic algorithm configuration is centralized in `genetic/config.py`. These constants control population size, evolution parameters, timing, and persistence.
+
+## Population Configuration
+
+### POPULATION_SIZE
+
+<ParamField path="POPULATION_SIZE" type="int" default="100">
+  Number of bots in each generation
+</ParamField>
+
+```python
+from genetic.config import POPULATION_SIZE
+
+print(f"Running {POPULATION_SIZE} bots per generation")
+```
+
+### INITIAL_BANKROLL
+
+<ParamField path="INITIAL_BANKROLL" type="float" default="100.0">
+  USD capital per bot per generation
+</ParamField>
+
+```python
+from genetic.config import INITIAL_BANKROLL
+
+total_capital = POPULATION_SIZE * INITIAL_BANKROLL
+print(f"Total capital deployed: ${total_capital:,.2f}")
+```
+
+## Timing Configuration
+
+### GENERATION_DURATION_SECONDS
+
+<ParamField path="GENERATION_DURATION_SECONDS" type="int" default="86400">
+  How long each generation runs (24 hours = 86400 seconds)
+</ParamField>
+
+```python
+from genetic.config import GENERATION_DURATION_SECONDS
+
+hours = GENERATION_DURATION_SECONDS / 3600
+print(f"Generation length: {hours} hours")
+```
+
+### TICK_INTERVAL_SECONDS
+
+<ParamField path="TICK_INTERVAL_SECONDS" type="int" default="30">
+  How often bots evaluate markets and trade (seconds)
+</ParamField>
+
+```python
+from genetic.config import TICK_INTERVAL_SECONDS, GENERATION_DURATION_SECONDS
+
+ticks_per_gen = GENERATION_DURATION_SECONDS // TICK_INTERVAL_SECONDS
+print(f"Ticks per generation: {ticks_per_gen}")
+# Output: Ticks per generation: 2880
+```
+
+### CHECKPOINT_INTERVAL_TICKS
+
+<ParamField path="CHECKPOINT_INTERVAL_TICKS" type="int" default="120">
+  Save checkpoint every N ticks (~1 hour at 30s intervals)
+</ParamField>
+
+```python
+from genetic.config import CHECKPOINT_INTERVAL_TICKS, TICK_INTERVAL_SECONDS
+
+checkpoint_minutes = (CHECKPOINT_INTERVAL_TICKS * TICK_INTERVAL_SECONDS) / 60
+print(f"Checkpoint every {checkpoint_minutes:.0f} minutes")
+```
+
+### PROGRESS_LOG_INTERVAL_TICKS
+
+<ParamField path="PROGRESS_LOG_INTERVAL_TICKS" type="int" default="60">
+  Log progress every N ticks (~30 minutes at 30s intervals)
+</ParamField>
+
+```python
+from genetic.config import PROGRESS_LOG_INTERVAL_TICKS
+
+if tick % PROGRESS_LOG_INTERVAL_TICKS == 0:
+    print(f"Progress update at tick {tick}")
+```
+
+## Evolution Parameters
+
+### ELITE_COUNT
+
+<ParamField path="ELITE_COUNT" type="int" default="5">
+  Top N genomes survive unchanged to next generation
+</ParamField>
+
+**Purpose:** Preserve best strategies
+
+```python
+from genetic.config import ELITE_COUNT
+
+print(f"Top {ELITE_COUNT} bots guaranteed to survive")
+```
+
+### TOURNAMENT_SIZE
+
+<ParamField path="TOURNAMENT_SIZE" type="int" default="7">
+  Number of candidates in tournament selection
+</ParamField>
+
+**Purpose:** Higher = more selection pressure toward best performers
+
+```python
+from genetic.config import TOURNAMENT_SIZE
+
+# Tournament selection picks best of N random bots
+print(f"Selection pressure: best of {TOURNAMENT_SIZE}")
+```
+
+### CROSSOVER_RATE
+
+<ParamField path="CROSSOVER_RATE" type="float" default="0.7">
+  Probability of crossover vs cloning (0.7 = 70%)
+</ParamField>
+
+**Values:**
+- 0.0: No crossover, only mutation
+- 0.7: 70% crossover, 30% clone
+- 1.0: Always crossover
+
+```python
+from genetic.config import CROSSOVER_RATE
+
+print(f"Crossover rate: {CROSSOVER_RATE:.0%}")
+print(f"Clone rate: {1-CROSSOVER_RATE:.0%}")
+```
+
+### MUTATION_RATE
+
+<ParamField path="MUTATION_RATE" type="float" default="0.15">
+  Per-gene probability of mutation (0.15 = 15%)
+</ParamField>
+
+**Impact:**
+- Low (0.01): Slow evolution, risk of stagnation
+- Medium (0.15): Good balance
+- High (0.50): High diversity, unstable convergence
+
+```python
+from genetic.config import MUTATION_RATE
+from genetic.genome import Genome
+
+avg_mutations = len(Genome.gene_names()) * MUTATION_RATE
+print(f"Expected mutations per genome: {avg_mutations:.1f}")
+# Output: Expected mutations per genome: 3.3 (22 genes × 15%)
+```
+
+### MUTATION_SIGMA
+
+<ParamField path="MUTATION_SIGMA" type="float" default="0.10">
+  Gaussian standard deviation for gene perturbation
+</ParamField>
+
+**Impact:**
+- Low (0.05): Small tweaks
+- Medium (0.10): Moderate changes
+- High (0.30): Large jumps
+
+```python
+from genetic.config import MUTATION_SIGMA
+import random
+
+# Example mutation
+old_gene = 0.5
+delta = random.gauss(0, MUTATION_SIGMA)
+new_gene = max(0.0, min(1.0, old_gene + delta))
+print(f"Gene mutated: {old_gene:.3f} → {new_gene:.3f}")
+```
+
+### IMMIGRATION_COUNT
+
+<ParamField path="IMMIGRATION_COUNT" type="int" default="5">
+  Number of random new genomes added each generation
+</ParamField>
+
+**Purpose:** Prevent premature convergence, maintain diversity
+
+```python
+from genetic.config import IMMIGRATION_COUNT, POPULATION_SIZE
+
+immigration_pct = (IMMIGRATION_COUNT / POPULATION_SIZE) * 100
+print(f"Immigration rate: {immigration_pct:.0f}% of population")
+# Output: Immigration rate: 5% of population
+```
+
+## Fitness Parameters
+
+### MIN_SETTLED_TRADES
+
+<ParamField path="MIN_SETTLED_TRADES" type="int" default="5">
+  Minimum settled trades required for positive fitness
+</ParamField>
+
+**Purpose:** Penalize inactive bots
+
+```python
+from genetic.config import MIN_SETTLED_TRADES
+
+if bot.account.n_settled < MIN_SETTLED_TRADES:
+    print(f"Bot inactive: only {bot.account.n_settled} trades")
+```
+
+### INACTIVE_FITNESS_PENALTY
+
+<ParamField path="INACTIVE_FITNESS_PENALTY" type="float" default="-100.0">
+  Fitness score for bots with insufficient trades
+</ParamField>
+
+**Purpose:** Ensure inactive bots don't survive
+
+```python
+from genetic.config import INACTIVE_FITNESS_PENALTY, MIN_SETTLED_TRADES
+
+if n_settled < MIN_SETTLED_TRADES:
+    fitness = INACTIVE_FITNESS_PENALTY
+else:
+    fitness = roi_pct
+```
+
+## Market Data Configuration
+
+### MARKET_CLOSE_WINDOW_HOURS
+
+<ParamField path="MARKET_CLOSE_WINDOW_HOURS" type="int" default="24">
+  Only fetch markets closing within this window (hours)
+</ParamField>
+
+**Purpose:** Reduce API load, focus on relevant markets
+
+```python
+from genetic.config import MARKET_CLOSE_WINDOW_HOURS
+from datetime import datetime, timedelta, timezone
+
+max_close = datetime.now(timezone.utc) + timedelta(hours=MARKET_CLOSE_WINDOW_HOURS)
+print(f"Fetching markets closing before {max_close}")
+```
+
+### MARKET_HISTORY_MAX_TICKS
+
+<ParamField path="MARKET_HISTORY_MAX_TICKS" type="int" default="120">
+  Rolling price history per market (~60 min at 30s ticks)
+</ParamField>
+
+**Purpose:** Memory management for price history
+
+```python
+from genetic.config import MARKET_HISTORY_MAX_TICKS, TICK_INTERVAL_SECONDS
+
+history_minutes = (MARKET_HISTORY_MAX_TICKS * TICK_INTERVAL_SECONDS) / 60
+print(f"Price history: {history_minutes:.0f} minutes")
+# Output: Price history: 60 minutes
+```
+
+## Settlement Configuration
+
+### SETTLEMENT_WAIT_HOURS
+
+<ParamField path="SETTLEMENT_WAIT_HOURS" type="int" default="4">
+  Hours to wait after trading for markets to settle
+</ParamField>
+
+**Purpose:** Give markets time to settle before fitness evaluation
+
+```python
+from genetic.config import SETTLEMENT_WAIT_HOURS
+
+print(f"Waiting {SETTLEMENT_WAIT_HOURS}h for settlement after generation ends")
+```
+
+### SETTLEMENT_CHECK_TICKS
+
+<ParamField path="SETTLEMENT_CHECK_TICKS" type="int" default="10">
+  Check for settlements every N ticks (~5 min at 30s)
+</ParamField>
+
+**Purpose:** Balance API load vs settlement latency
+
+```python
+from genetic.config import SETTLEMENT_CHECK_TICKS
+
+if tick % SETTLEMENT_CHECK_TICKS == 0:
+    engine.settle_with_targeted_check()
+```
+
+### SETTLEMENT_WAIT_POLL_SECONDS
+
+<ParamField path="SETTLEMENT_WAIT_POLL_SECONDS" type="int" default="120">
+  Poll interval during settlement wait period (seconds)
+</ParamField>
+
+```python
+import time
+from genetic.config import SETTLEMENT_WAIT_POLL_SECONDS
+
+while waiting_for_settlement:
+    engine.settle_with_targeted_check()
+    time.sleep(SETTLEMENT_WAIT_POLL_SECONDS)
+```
+
+## Persistence Configuration
+
+### STATE_DIR
+
+<ParamField path="STATE_DIR" type="Path" default="data/evolution">
+  Directory for checkpoints and evolution state
+</ParamField>
+
+```python
+from genetic.config import STATE_DIR
+import json
+
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+checkpoint_path = STATE_DIR / f"checkpoint_gen_{generation}.json"
+with open(checkpoint_path, "w") as f:
+    json.dump(state, f)
+```
+
+## Complete Configuration Example
+
+```python
+from genetic.config import *
+
+print("=== Population ===")
+print(f"Size: {POPULATION_SIZE}")
+print(f"Initial bankroll: ${INITIAL_BANKROLL}")
+
+print("\n=== Timing ===")
+print(f"Generation: {GENERATION_DURATION_SECONDS/3600:.0f} hours")
+print(f"Tick interval: {TICK_INTERVAL_SECONDS}s")
+print(f"Ticks per gen: {GENERATION_DURATION_SECONDS//TICK_INTERVAL_SECONDS}")
+
+print("\n=== Evolution ===")
+print(f"Elite: {ELITE_COUNT}")
+print(f"Tournament: {TOURNAMENT_SIZE}")
+print(f"Crossover: {CROSSOVER_RATE:.0%}")
+print(f"Mutation rate: {MUTATION_RATE:.0%}")
+print(f"Mutation sigma: {MUTATION_SIGMA}")
+print(f"Immigration: {IMMIGRATION_COUNT}")
+
+print("\n=== Fitness ===")
+print(f"Min trades: {MIN_SETTLED_TRADES}")
+print(f"Inactive penalty: {INACTIVE_FITNESS_PENALTY}")
+
+print("\n=== Persistence ===")
+print(f"State dir: {STATE_DIR}")
+```
+
+## Tuning Recommendations
+
+### Faster Experimentation
+```python
+GENERATION_DURATION_SECONDS = 3600  # 1 hour
+TICK_INTERVAL_SECONDS = 10  # 10s ticks
+POPULATION_SIZE = 20  # Small population
+```
+
+### Production Settings
+```python
+GENERATION_DURATION_SECONDS = 86400  # 24 hours
+TICK_INTERVAL_SECONDS = 30  # 30s ticks
+POPULATION_SIZE = 100  # Full population
+ELITE_COUNT = 10  # Preserve more winners
+```
+
+### High Diversity
+```python
+MUTATION_RATE = 0.25  # More mutations
+IMMIGRATION_COUNT = 10  # More random bots
+TOURNAMENT_SIZE = 3  # Less selection pressure
+```
+
+### High Convergence
+```python
+MUTATION_RATE = 0.05  # Fewer mutations
+ELITE_COUNT = 15  # Keep more winners
+TOURNAMENT_SIZE = 10  # Strong selection pressure
+```

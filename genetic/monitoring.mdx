@@ -1,0 +1,435 @@
+---
+title: "Monitoring Evolution"
+description: "Track genetic algorithm progress in real-time and analyze performance"
+---
+
+## Real-time Monitoring
+
+The evolution system provides comprehensive logging at multiple levels.
+
+### Console Output
+
+INFO-level logs appear in the console during execution:
+
+```bash
+python -m genetic
+```
+
+**Output:**
+```
+[15:42:30] [Gen 3 | 12.0h] Active: 87/100 | Open: 45 | Trades: 892 | Settled: 847 |
+Est ROI: +23.5%/+5.2% | Realized: +18.7%/+4.1%
+```
+
+### Log Files
+
+Full debug logs are written to `data/evolution/evolution.log`:
+
+```bash
+tail -f data/evolution/evolution.log
+```
+
+**Log format:**
+```
+2025-03-05 15:42:30 [INFO] [Gen 3 | 12.0h] Active: 87/100 | Open: 45...
+2025-03-05 15:42:30 [DEBUG] MarketDataFeed: fetched 347 markets in 1.2s
+2025-03-05 15:42:31 [DEBUG] Bot bot_a3f8c1: trade YES on MARKET-ABC for $5.23
+2025-03-05 15:42:31 [DEBUG] PaperEngine: filled 8 contracts @ $0.65
+```
+
+## Progress Metrics
+
+Evolution tracks these key metrics:
+
+### Tick Progress
+
+Logged every `PROGRESS_LOG_INTERVAL_TICKS` (default: 60 ticks = ~30 min):
+
+```python genetic/monitor.py
+def log_tick_progress(
+    logger: logging.Logger,
+    gen_num: int,
+    tick_count: int,
+    bots: list[GeneticBot],
+    feed: MarketDataFeed | None = None,
+):
+    elapsed_hrs = tick_count * TICK_INTERVAL_SECONDS / 3600
+    active = sum(1 for b in bots if b.account.total_trades > 0)
+    open_pos = sum(b.account.n_open for b in bots)
+    total_trades = sum(b.account.total_trades for b in bots)
+    total_settled = sum(b.account.n_settled for b in bots)
+    
+    # Realized ROI (from settled positions)
+    realized_rois = [b.account.roi_pct for b in bots]
+    best_realized = max(realized_rois)
+    median_realized = sorted(realized_rois)[len(realized_rois) // 2]
+    
+    # Unrealized ROI (estimated from current market prices)
+    if feed:
+        total_rois = [b.account.total_roi_pct(feed) for b in bots]
+        best_total = max(total_rois)
+        median_total = sorted(total_rois)[len(total_rois) // 2]
+```
+
+**Metrics explained:**
+
+<ParamField path="Active" type="int">
+  Number of bots that have made at least 1 trade.
+  
+  Low values (less than 50) indicate overly strict filters or market scarcity.
+</ParamField>
+
+<ParamField path="Open" type="int">
+  Total open positions across all 100 bots.
+  
+  High values (greater than 200) suggest markets aren't settling quickly.
+</ParamField>
+
+<ParamField path="Trades" type="int">
+  Cumulative trades executed by all bots.
+  
+  Should increase steadily. Plateaus indicate limits hit.
+</ParamField>
+
+<ParamField path="Settled" type="int">
+  Positions that have settled (outcomes determined).
+  
+  This number determines fitness quality. Goal: greater than 500 by generation end.
+</ParamField>
+
+<ParamField path="Est ROI" type="string">
+  Best/Median estimated ROI including unrealized positions.
+  
+  Format: `+23.5%/+5.2%` = best bot has +23.5%, median has +5.2%
+</ParamField>
+
+<ParamField path="Realized ROI" type="string">
+  Best/Median ROI from settled trades only.
+  
+  This is what determines fitness. Usually lower than Est ROI.
+</ParamField>
+
+### Generation Summary
+
+After each generation completes:
+
+```python genetic/monitor.py
+def log_generation_summary(
+    logger: logging.Logger,
+    gen_num: int,
+    bots: list[GeneticBot],
+    fitness: list[float],
+):
+    ranked = sorted(zip(fitness, bots), key=lambda x: x[0], reverse=True)
+    
+    logger.info(f"\n{'=' * 70}")
+    logger.info(f"GENERATION {gen_num} RESULTS")
+    logger.info(f"{'=' * 70}")
+    logger.info(
+        f"{'Rank':<5} {'Bot ID':<14} {'ROI%':>8} {'Trades':>7} "
+        f"{'Settled':>8} {'WinRate':>8} {'Signal':>15}"
+    )
+    logger.info("-" * 70)
+    
+    for i, (fit, bot) in enumerate(ranked[:20]):
+        p = bot.params
+        logger.info(
+            f"{i + 1:<5} {bot.bot_id:<14} {fit:>7.1f}% "
+            f"{bot.account.total_trades:>7} "
+            f"{bot.account.n_settled:>8} "
+            f"{bot.account.win_rate * 100:>7.1f}% "
+            f"{p['signal_type']:>15}"
+        )
+```
+
+**Example output:**
+```
+======================================================================
+GENERATION 3 RESULTS
+======================================================================
+Rank  Bot ID         ROI%   Trades  Settled  WinRate  Signal
+----------------------------------------------------------------------
+1     bot_a3f8c1    +34.2%     18       18    72.2%   mean_reversion
+2     bot_9d2e45    +28.9%     24       23    65.2%   value
+3     bot_7b1a92    +22.1%     15       15    60.0%   momentum
+4     bot_4c6e8d    +18.5%     22       21    57.1%   contrarian
+5     bot_2b9f1a    +15.3%     19       19    52.6%   mean_reversion
+...
+20    bot_8e3a4f     -2.1%     12       12    41.7%   price_level
+
+Signal distribution: {'mean_reversion': 42, 'value': 28, 'momentum': 15, 'contrarian': 10, 'price_level': 5}
+Top-10 category prefs: {'politics': 8, 'sports': 6, 'economics': 5, 'finance': 4, 'world': 3}
+```
+
+## Performance Statistics
+
+Evolution computes detailed statistics:
+
+```python genetic/monitor.py
+def compute_generation_stats(bots: list[GeneticBot]) -> dict:
+    """Compute summary stats for a completed generation."""
+    fitness = [evaluate_fitness(b) for b in bots]
+    trades = [b.account.total_trades for b in bots]
+    win_rates = [b.account.win_rate * 100 for b in bots]
+    sorted_fitness = sorted(fitness)
+    
+    return {
+        "best_roi": sorted_fitness[-1],
+        "median_roi": sorted_fitness[len(sorted_fitness) // 2],
+        "worst_roi": sorted_fitness[0],
+        "mean_roi": sum(fitness) / len(fitness),
+        "mean_trades": sum(trades) / len(trades),
+        "max_trades": max(trades),
+        "mean_win_rate": sum(win_rates) / len(win_rates),
+        "total_settled": sum(b.account.n_settled for b in bots),
+        "active_bots": sum(1 for b in bots if b.account.total_trades > 0),
+    }
+```
+
+**Stats saved to generation files:**
+
+```json data/evolution/gen_0003.json
+{
+  "generation": 3,
+  "timestamp": "2025-03-05T23:42:15.123456+00:00",
+  "genomes": [...],
+  "fitness_scores": [...],
+  "stats": {
+    "best_roi": 34.2,
+    "median_roi": 4.8,
+    "worst_roi": -100.0,
+    "mean_roi": -5.3,
+    "mean_trades": 16.3,
+    "max_trades": 45,
+    "mean_win_rate": 51.2,
+    "total_settled": 1247,
+    "active_bots": 87
+  }
+}
+```
+
+## Market Feed Statistics
+
+Monitor the market data feed:
+
+```python
+feed.get_stats()
+# Returns:
+# {
+#   'open_markets': 347,
+#   'settled_markets': 128,
+#   'categories': 8,
+#   'fetch_count': 2880,  # Total fetches (every 30s for 24h = 2880)
+#   'error_count': 3
+# }
+```
+
+**Logged at generation start:**
+```
+Feed ready: 347 markets (closing within window), 8 categories: 
+['climate', 'economics', 'finance', 'politics', 'science', 'sports', 'technology', 'world']
+```
+
+## Checkpoints
+
+Mid-generation snapshots are saved every `CHECKPOINT_INTERVAL_TICKS` (default: 120 ticks = ~1 hour):
+
+```python genetic/persistence.py
+def save_checkpoint(generation: int, bots, tick_count: int):
+    checkpoint = {
+        "generation": generation,
+        "tick": tick_count,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "accounts": {}
+    }
+    
+    for bot in bots:
+        acct = bot.account
+        checkpoint["accounts"][bot.bot_id] = {
+            "genome_id": bot.genome.id,
+            "cash": acct.cash,
+            "total_trades": acct.total_trades,
+            "n_settled": acct.n_settled,
+            "n_open": acct.n_open,
+            "realized_pnl": acct.realized_pnl,
+            "roi_pct": acct.roi_pct,
+        }
+```
+
+**File:** `data/evolution/checkpoint_gen0003.json`
+
+Checkpoints enable crash recovery and mid-generation analysis.
+
+## Custom Monitoring
+
+### Add Custom Metrics
+
+Extend the monitoring system:
+
+```python
+from genetic.monitor import setup_logging
+
+logger = setup_logging()
+
+# During evolution loop
+def custom_monitor(bots, feed):
+    # Track signal type performance
+    signal_performance = {}
+    for bot in bots:
+        sig = bot.params['signal_type']
+        if sig not in signal_performance:
+            signal_performance[sig] = []
+        signal_performance[sig].append(bot.account.roi_pct)
+    
+    for sig, rois in signal_performance.items():
+        avg_roi = sum(rois) / len(rois)
+        logger.info(f"Signal {sig}: avg ROI = {avg_roi:.1f}%")
+```
+
+### Export to External Systems
+
+```python
+import json
+import requests
+
+def push_metrics_to_grafana(stats: dict):
+    """Send metrics to Grafana/Prometheus."""
+    payload = {
+        "metric": "genetic_evolution",
+        "value": stats["best_roi"],
+        "timestamp": int(time.time()),
+        "tags": {
+            "generation": stats.get("generation", 0),
+            "median_roi": stats["median_roi"]
+        }
+    }
+    requests.post("http://localhost:9091/metrics/job/evolution", json=payload)
+```
+
+### Real-time Dashboard
+
+Create a simple web dashboard:
+
+```python
+from flask import Flask, jsonify
+import json
+
+app = Flask(__name__)
+
+@app.route("/api/latest")
+def get_latest():
+    with open("data/evolution/latest.json") as f:
+        pointer = json.load(f)
+    with open(pointer["file"]) as f:
+        data = json.load(f)
+    return jsonify(data["stats"])
+
+@app.route("/api/hof")
+def get_hof():
+    with open("data/evolution/hall_of_fame.json") as f:
+        return jsonify(json.load(f))
+
+if __name__ == "__main__":
+    app.run(port=8000)
+```
+
+Access at `http://localhost:8000/api/latest`
+
+## Interpreting Metrics
+
+### Healthy Evolution
+
+Good signs:
+
+<Check>Best ROI improving across generations: 10% → 15% → 22% → 28%</Check>
+<Check>Active bots 70-90% (most genomes find trades)</Check>
+<Check>Mean trades per bot >15 (sufficient exploration)</Check>
+<Check>Settlement rate >80% (trades/settled ≈ 1.2)</Check>
+<Check>Signal distribution converging (evolution finding best strategies)</Check>
+
+### Problem Indicators
+
+Warning signs:
+
+<Warning>Best ROI not improving after 5+ generations (stuck in local optimum)</Warning>
+<Warning>Active bots less than 50% (filters too strict)</Warning>
+<Warning>Mean trades less than 5 (bots not trading)</Warning>
+<Warning>Settlement rate less than 50% (markets not settling fast enough)</Warning>
+<Warning>All bots using same signal (premature convergence, increase immigration)</Warning>
+
+## Alerting
+
+Set up alerts for critical conditions:
+
+```python
+def check_evolution_health(stats: dict):
+    """Alert if evolution is unhealthy."""
+    if stats["active_bots"] < 50:
+        logger.warning(
+            f"LOW ACTIVITY: Only {stats['active_bots']}/100 bots trading. "
+            "Check market availability or reduce filter strictness."
+        )
+    
+    if stats["total_settled"] < 300:
+        logger.warning(
+            f"LOW SETTLEMENTS: Only {stats['total_settled']} settled trades. "
+            "Extend generation duration or reduce settlement timeout."
+        )
+    
+    if stats["best_roi"] < -50:
+        logger.error(
+            f"CRITICAL: Best bot has {stats['best_roi']:.1f}% ROI. "
+            "Check for bugs in signal logic or market data issues."
+        )
+```
+
+## Visualization
+
+Create plots from saved data:
+
+```python
+import matplotlib.pyplot as plt
+import json
+import glob
+
+# Load all generations
+gen_files = sorted(glob.glob("data/evolution/gen_*.json"))
+generations = []
+best_roi = []
+median_roi = []
+
+for file in gen_files:
+    with open(file) as f:
+        data = json.load(f)
+    generations.append(data["generation"])
+    best_roi.append(data["stats"]["best_roi"])
+    median_roi.append(data["stats"]["median_roi"])
+
+# Plot ROI over time
+plt.figure(figsize=(10, 6))
+plt.plot(generations, best_roi, label="Best ROI", marker='o')
+plt.plot(generations, median_roi, label="Median ROI", marker='s')
+plt.axhline(y=0, color='r', linestyle='--', alpha=0.3)
+plt.xlabel("Generation")
+plt.ylabel("ROI %")
+plt.title("Evolution Progress")
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.savefig("evolution_progress.png")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Analysis" icon="chart-mixed" href="/genetic/analysis">
+    Deep dive into analyzing evolution results
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/genetic/quickstart">
+    Get evolution running
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/genetic/architecture">
+    Understand system components
+  </Card>
+</CardGroup>

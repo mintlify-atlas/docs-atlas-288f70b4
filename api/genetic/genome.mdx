@@ -1,0 +1,315 @@
+---
+title: "Genome"
+description: "Genome dataclass for genetic trading strategies with 22 evolvable genes"
+---
+
+## Overview
+
+The `Genome` class defines the complete genetic representation of a trading bot's strategy. All gene values are stored as floats in the range [0.0, 1.0] and decoded into actual trading parameters by the `decode_genome()` function.
+
+## Genome Class
+
+### Fields
+
+#### Identity
+
+<ParamField path="id" type="string">
+  Unique 8-character identifier (auto-generated)
+</ParamField>
+
+<ParamField path="generation" type="int" default="0">
+  Generation number this genome belongs to
+</ParamField>
+
+<ParamField path="parent_ids" type="list[str]" default="[]">
+  IDs of parent genomes (1 for clone/elite, 2 for crossover)
+</ParamField>
+
+#### Market Selection Genes (5 genes)
+
+<ParamField path="min_volume_24h" type="float" default="0.5">
+  Minimum 24h volume filter (decoded: 0-5000)
+</ParamField>
+
+<ParamField path="min_open_interest" type="float" default="0.5">
+  Minimum open interest filter (decoded: 0-2000)
+</ParamField>
+
+<ParamField path="min_time_to_expiry_hrs" type="float" default="0.3">
+  Minimum hours until market expiry (decoded: 0-24h)
+</ParamField>
+
+<ParamField path="max_time_to_expiry_hrs" type="float" default="0.7">
+  Maximum hours until market expiry (decoded: 0-24h)
+</ParamField>
+
+<ParamField path="category_mask" type="float" default="0.5">
+  Bitmask for market categories to trade (decoded to category list)
+</ParamField>
+
+#### Entry Signal Genes (8 genes)
+
+<ParamField path="signal_type" type="float" default="0.5">
+  Signal strategy selector (decoded: price_level, momentum, mean_reversion, value, contrarian)
+</ParamField>
+
+<ParamField path="price_threshold_low" type="float" default="0.3">
+  Low price threshold (decoded: 0.01-0.50)
+</ParamField>
+
+<ParamField path="price_threshold_high" type="float" default="0.7">
+  High price threshold (decoded: 0.50-0.99)
+</ParamField>
+
+<ParamField path="momentum_lookback" type="float" default="0.5">
+  Momentum lookback period (decoded: 1-60 ticks)
+</ParamField>
+
+<ParamField path="momentum_trigger" type="float" default="0.5">
+  Momentum trigger threshold (decoded: -10% to +10%)
+</ParamField>
+
+<ParamField path="mean_rev_zscore" type="float" default="0.5">
+  Mean reversion z-score threshold (decoded: 0.5-3.0)
+</ParamField>
+
+<ParamField path="value_edge_min" type="float" default="0.5">
+  Minimum value edge required (decoded: 0.01-0.30)
+</ParamField>
+
+<ParamField path="contrarian_threshold" type="float" default="0.5">
+  Contrarian confidence threshold (decoded: 0.60-0.95)
+</ParamField>
+
+#### Side Selection Genes (2 genes)
+
+<ParamField path="side_bias" type="float" default="0.5">
+  Directional bias: less than 0.2 = always no, 0.2-0.8 = signal, greater than 0.8 = always yes
+</ParamField>
+
+<ParamField path="side_flip_prob" type="float" default="0.0">
+  Probability of randomly flipping side (decoded: 0-0.5)
+</ParamField>
+
+#### Position Sizing Genes (3 genes)
+
+<ParamField path="bankroll_fraction" type="float" default="0.02">
+  Fraction of bankroll to risk per trade (decoded: 0.005-0.10)
+</ParamField>
+
+<ParamField path="max_concurrent_positions" type="float" default="0.3">
+  Maximum concurrent open positions (decoded: 1-20)
+</ParamField>
+
+<ParamField path="max_single_market_pct" type="float" default="0.5">
+  Max allocation to single market (decoded: 0.01-0.25)
+</ParamField>
+
+#### Risk Management Genes (4 genes)
+
+<ParamField path="daily_loss_limit_pct" type="float" default="0.5">
+  Daily loss limit as % of equity (decoded: 0.02-0.30)
+</ParamField>
+
+<ParamField path="max_trades_per_day" type="float" default="0.5">
+  Maximum trades per day (decoded: 1-100)
+</ParamField>
+
+<ParamField path="min_price" type="float" default="0.1">
+  Minimum acceptable contract price (decoded: 0.01-0.50)
+</ParamField>
+
+<ParamField path="max_price" type="float" default="0.9">
+  Maximum acceptable contract price (decoded: 0.50-0.99)
+</ParamField>
+
+## Class Methods
+
+### gene_names()
+
+Get list of all evolvable gene field names.
+
+<ResponseField name="genes" type="list[str]">
+  List of 22 gene field names
+</ResponseField>
+
+```python
+from genetic.genome import Genome
+
+genes = Genome.gene_names()
+print(f"Genome has {len(genes)} genes: {genes}")
+# Output: Genome has 22 genes: ['min_volume_24h', 'min_open_interest', ...]
+```
+
+### random(generation=0)
+
+Create a genome with all genes randomized uniformly in [0, 1].
+
+<ParamField path="generation" type="int" default="0">
+  Generation number to assign
+</ParamField>
+
+<ResponseField name="genome" type="Genome">
+  New genome with random gene values
+</ResponseField>
+
+```python
+# Create random genome for generation 5
+genome = Genome.random(generation=5)
+print(f"ID: {genome.id}")
+print(f"Signal type gene: {genome.signal_type:.3f}")
+print(f"Bankroll fraction: {genome.bankroll_fraction:.3f}")
+```
+
+## Instance Methods
+
+### clone()
+
+Create a deep copy with a new unique ID.
+
+<ResponseField name="genome" type="Genome">
+  Cloned genome with new ID
+</ResponseField>
+
+```python
+original = Genome.random()
+clone = original.clone()
+
+print(f"Original ID: {original.id}")
+print(f"Clone ID: {clone.id}")
+print(f"Same genes: {original.signal_type == clone.signal_type}")
+```
+
+### to_dict()
+
+Serialize genome to dictionary for JSON persistence.
+
+<ResponseField name="data" type="dict">
+  Dict containing all genome fields
+</ResponseField>
+
+```python
+import json
+
+genome = Genome.random()
+data = genome.to_dict()
+
+# Save to file
+with open("genome.json", "w") as f:
+    json.dump(data, f, indent=2)
+```
+
+### from_dict(d)
+
+Deserialize genome from dictionary.
+
+<ParamField path="d" type="dict" required>
+  Dictionary containing genome fields
+</ParamField>
+
+<ResponseField name="genome" type="Genome">
+  Reconstructed genome instance
+</ResponseField>
+
+```python
+import json
+
+# Load from file
+with open("genome.json") as f:
+    data = json.load(f)
+
+genome = Genome.from_dict(data)
+print(f"Loaded genome {genome.id} from generation {genome.generation}")
+```
+
+## Signal Types
+
+The `signal_type` gene is discretized into one of these strategies:
+
+```python
+SIGNAL_TYPES = [
+    "price_level",      # Buy when price in specific range
+    "momentum",         # Buy based on price direction
+    "mean_reversion",   # Buy on z-score deviation
+    "value",            # Buy cheap side vs 50/50 fair value
+    "contrarian"        # Bet against crowd when confident
+]
+```
+
+## decode_genome Function
+
+Convert [0,1] gene values into actual trading parameters.
+
+<ParamField path="genome" type="Genome" required>
+  Genome to decode
+</ParamField>
+
+<ParamField path="known_categories" type="list[str]" required>
+  List of market categories available
+</ParamField>
+
+<ResponseField name="params" type="dict">
+  Decoded trading parameters ready for bot execution
+</ResponseField>
+
+```python
+from genetic.genome import Genome, decode_genome
+
+genome = Genome.random()
+categories = ["Finance", "Politics", "Economics", "Science"]
+
+params = decode_genome(genome, categories)
+
+print(f"Signal type: {params['signal_type']}")
+print(f"Bankroll fraction: {params['bankroll_fraction']:.2%}")
+print(f"Max concurrent: {params['max_concurrent']}")
+print(f"Min volume: ${params['min_volume_24h']:,.0f}")
+print(f"Trading categories: {params['categories']}")
+print(f"Price range: ${params['min_price']:.2f}-${params['max_price']:.2f}")
+```
+
+**Example decoded output:**
+```python
+{
+    # Market selection
+    "min_volume_24h": 2500.0,
+    "min_open_interest": 1000.0,
+    "min_time_to_expiry_hrs": 4.5,
+    "max_time_to_expiry_hrs": 18.2,
+    "categories": ["Finance", "Economics"],
+    
+    # Entry signal
+    "signal_type": "momentum",
+    "price_threshold_low": 0.35,
+    "price_threshold_high": 0.72,
+    "momentum_lookback_ticks": 30,
+    "momentum_trigger_pct": 0.05,
+    "mean_rev_zscore": 2.0,
+    "value_edge_min": 0.15,
+    "contrarian_threshold": 0.80,
+    
+    # Side selection
+    "side_bias": 0.5,
+    "side_flip_prob": 0.15,
+    
+    # Position sizing
+    "bankroll_fraction": 0.025,
+    "max_concurrent": 8,
+    "max_single_market_pct": 0.12,
+    
+    # Risk management
+    "daily_loss_limit_pct": 0.15,
+    "max_trades_per_day": 50,
+    "min_price": 0.20,
+    "max_price": 0.75
+}
+```
+
+## Gene Evolution
+
+Genes evolve through:
+1. **Crossover:** Random mix of parent genes
+2. **Mutation:** Gaussian perturbation clamped to [0,1]
+3. **Immigration:** Fresh random genomes for diversity
+
+See the [Evolution](/api/genetic/evolution) reference for details.

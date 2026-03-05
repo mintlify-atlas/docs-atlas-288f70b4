@@ -1,0 +1,317 @@
+---
+title: "Running the Bot"
+description: "How to run paper trading and real trading bots"
+---
+
+## Overview
+
+Simple Kalshi Bot provides two main modes of operation:
+
+1. **Paper Trading** (`bot.py`) - Test strategies with mock orders
+2. **Real Trading** (`consensus.py`) - Execute real trades on Kalshi
+
+## Prerequisites
+
+Before running the bot, ensure you have:
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Step>
+  
+  <Step title="Configure environment">
+    Create and configure your `.env` file. See the [Configuration Guide](/guides/configuration) for details.
+    
+    ```bash
+    cp .env.example .env
+    # Edit .env with your settings
+    ```
+  </Step>
+  
+  <Step title="Create data directory">
+    ```bash
+    mkdir -p data
+    ```
+  </Step>
+</Steps>
+
+## Paper Trading Mode
+
+Paper trading mode (`bot.py`) runs multiple strategies simultaneously without executing real orders. Perfect for testing and strategy development.
+
+### Available Strategies
+
+The paper trading bot runs 7 different strategies:
+
+| Strategy | Description |
+|----------|-------------|
+| **PREVIOUS** | Buy the same side as the previous market result |
+| **MOMENTUM** | Buy based on BTC price direction over 60 seconds |
+| **CONSENSUS** | Only trade when PREVIOUS and MOMENTUM agree |
+| **MOMENTUM_15** | Buy based on BTC direction over 15 minutes |
+| **PREVIOUS_2** | Wait for PREVIOUS side at price ≤ $0.45 |
+| **CONSENSUS_2** | Wait for CONSENSUS side at price ≤ $0.45 |
+| **ARBITRAGE** | Buy immediately, then hedge opposite side if profitable |
+
+### Running Paper Trading
+
+```bash
+python bot.py
+```
+
+### Example Output
+
+```
+Watching KXBTC15M markets with 7 strategies:
+  1. PREVIOUS:  Buy same side as previous market result
+  2. MOMENTUM:  Buy based on BTC price direction in last 60s
+  3. CONSENSUS: Buy only when PREVIOUS and MOMENTUM agree
+  4. MOMENTUM_15: Buy based on BTC direction over 900s
+  5. PREVIOUS_2: Wait for PREVIOUS side at <= $0.45
+  6. CONSENSUS_2: Wait for CONSENSUS side at <= $0.45
+  7. ARBITRAGE: Buy immediately, then hedge opposite side if profitable (< $10.00)
+Stake: $5 per trade | Polling: 5s | CSV: data/mock_trades.csv
+CONSENSUS controls: price<=0.55, risk=1.0% max=2.0%
+Loss caps: daily=3.0R weekly=8.0R | rolling window=30 | fee=0.00%
+
+Loaded 0 trades
+[14:23:45] KXBTC15M-25MAR05-T1030 (847s) | yes=0.52 no=0.52 | BTC=95,432 | P:$0.00 M:$0.00 C:$0.00 M15:$0.00 P2:$0.00 C2:$0.00 A:$0.00 CB:$500.00
+  -> [PREVIOUS] Waiting for KXBTC15M-25MAR05-T1015 to settle...
+```
+
+### Understanding the Output
+
+Each status line shows:
+
+- **Timestamp** - Current time
+- **Market ticker** - Current active market
+- **Time to close** - Seconds until market expires
+- **Prices** - Current yes/no ask prices
+- **BTC price** - Current Bitcoin spot price
+- **Strategy P&L** - Running profit/loss for each strategy:
+  - `P` = PREVIOUS
+  - `M` = MOMENTUM
+  - `C` = CONSENSUS
+  - `M15` = MOMENTUM_15
+  - `P2` = PREVIOUS_2
+  - `C2` = CONSENSUS_2
+  - `A` = ARBITRAGE (combined with hedge)
+  - `CB` = CONSENSUS bankroll
+
+### Stopping Paper Trading
+
+Press `Ctrl+C` to stop the bot gracefully:
+
+```
+^C
+Stopped.
+=== FINAL STATS ===
+PREVIOUS:  $-2.35 | 12W/15L | 3 pending
+MOMENTUM:  $+4.20 | 18W/14L | 2 pending
+CONSENSUS: $+6.85 | 22W/8L | 1 pending
+MOMENTUM_15: $+1.50 | 14W/12L | 2 pending
+PREVIOUS_2:  $+3.10 | 16W/11L | 0 pending
+CONSENSUS_2: $+8.40 | 24W/7L | 1 pending
+ARBITRAGE:   $+2.15 | 28W/6L | 4 pending
+TOTAL:     $+23.85 | 134W/73L
+```
+
+## Real Trading Mode
+
+Real trading mode (`consensus.py`) executes the CONSENSUS strategy on Kalshi using real API credentials.
+
+<Warning>
+  Real trading involves financial risk. Always test thoroughly in paper trading mode first, and start with `DRY_RUN=true`.
+</Warning>
+
+### Setup for Real Trading
+
+<Steps>
+  <Step title="Generate Kalshi API credentials">
+    1. Log into your Kalshi account
+    2. Go to Profile → API Keys
+    3. Create a new API key
+    4. Download the private key file
+  </Step>
+  
+  <Step title="Store credentials securely">
+    ```bash
+    mkdir -p ~/.key/kalshi
+    mv ~/Downloads/kalshi_key.pem ~/.key/kalshi/key
+    chmod 600 ~/.key/kalshi/key
+    ```
+  </Step>
+  
+  <Step title="Configure environment">
+    Edit `.env` with your credentials:
+    
+    ```bash
+    KALSHI_API_KEY_ID=your-actual-key-id
+    KALSHI_PRIVATE_KEY_PATH=~/.key/kalshi/key
+    KALSHI_USE_DEMO=true  # Start with demo
+    DRY_RUN=true          # Start with dry run
+    ```
+  </Step>
+</Steps>
+
+### Testing with Demo API
+
+Always start with the demo API:
+
+```bash
+# In .env:
+KALSHI_USE_DEMO=true
+DRY_RUN=true
+
+# Run the bot
+python consensus.py
+```
+
+### Example Output
+
+```
+============================================================
+CONSENSUS STRATEGY BOT - REAL TRADING
+============================================================
+Series: KXBTC15M
+Stake: $5.0 per trade
+Momentum window: 60s
+Poll interval: 5s
+Trades CSV: data/consensus_trades.csv
+DRY RUN: True
+
+API: https://demo-api.kalshi.co/trade-api/v2
+API Key: a1b2c3d4...
+Account balance: $10000.00
+
+Loaded 0 trades from CSV
+Stats: $0.00 profit | 0W/0L | 0 pending
+
+Starting bot loop...
+------------------------------------------------------------
+[14:30:15] [DRY] KXBTC15M-25MAR05-T1045 (782s) | yes=0.48 no=0.52 | BTC=95,543 | P&L: $0.00
+  Market changed: KXBTC15M-25MAR05-T1030 -> KXBTC15M-25MAR05-T1045
+  PREVIOUS signal: yes (from KXBTC15M-25MAR05-T1030)
+  MOMENTUM signal: yes (BTC +0.116%)
+
+  >>> CONSENSUS SIGNAL: YES <<<
+  Placing order: BUY 10 yes @ $0.48 ($4.80 total)
+  Order placed! ID: DRY-RUN-f8e9a7b6-...
+```
+
+### Enabling Live Trading
+
+<Warning>
+  Only proceed after extensive testing in demo mode and dry-run mode.
+</Warning>
+
+<Steps>
+  <Step title="Switch to production API">
+    ```bash
+    # In .env:
+    KALSHI_USE_DEMO=false
+    ```
+    
+    Test with dry run still enabled to verify production API access.
+  </Step>
+  
+  <Step title="Enable real orders">
+    ```bash
+    # In .env:
+    DRY_RUN=false
+    ```
+    
+    <Tip>
+      Start with small position sizes (`STAKE_USD=2`) and monitor closely.
+    </Tip>
+  </Step>
+  
+  <Step title="Monitor actively">
+    Watch the bot output and check your Kalshi account to verify orders are executing correctly.
+  </Step>
+</Steps>
+
+## Advanced Usage
+
+### Running in the Background
+
+Use `nohup` or `screen` to run the bot continuously:
+
+```bash
+# Using nohup
+nohup python bot.py > bot.log 2>&1 &
+
+# Using screen
+screen -S kalshi-bot
+python bot.py
+# Press Ctrl+A, then D to detach
+
+# Reattach later
+screen -r kalshi-bot
+```
+
+### Logging Output
+
+Redirect output to a log file:
+
+```bash
+python bot.py | tee -a logs/bot-$(date +%Y%m%d).log
+```
+
+### Multiple Instances
+
+Run different strategies on different markets:
+
+```bash
+# Terminal 1: BTC markets
+KALSHI_EVENT_TICKER_PREFIX=KXBTC15M python bot.py
+
+# Terminal 2: ETH markets
+KALSHI_EVENT_TICKER_PREFIX=KXETH15M python bot.py
+```
+
+<Note>
+  Make sure to use different CSV output paths if running multiple instances to avoid data conflicts.
+</Note>
+
+## Troubleshooting
+
+### "No open market found"
+
+**Cause:** No active markets for the specified ticker prefix.
+
+**Solution:** Check that markets are available on Kalshi, or try a different `KALSHI_EVENT_TICKER_PREFIX`.
+
+### "Client init failed: KALSHI_API_KEY_ID environment variable required"
+
+**Cause:** Missing or invalid API credentials.
+
+**Solution:** Verify your `.env` file has `KALSHI_API_KEY_ID` and `KALSHI_PRIVATE_KEY_PATH` set correctly.
+
+### "Could not fetch balance: 401"
+
+**Cause:** Authentication failed.
+
+**Solution:** 
+- Verify API key ID is correct
+- Check private key file path and permissions
+- Ensure private key matches the API key
+
+### "BTC price error"
+
+**Cause:** Coinbase API timeout or rate limit.
+
+**Solution:** This is usually temporary. The bot will continue running and retry on the next poll.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Review all configuration options
+  </Card>
+  <Card title="Analyzing Results" icon="chart-line" href="/guides/analyzing-results">
+    Learn how to analyze your trading performance
+  </Card>
+</CardGroup>

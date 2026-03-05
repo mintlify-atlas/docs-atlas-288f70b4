@@ -1,0 +1,270 @@
+---
+title: "bot.py"
+description: "Core trading bot module with 7 paper trading strategies for Kalshi KXBTC15M markets"
+---
+
+## Overview
+
+The `bot.py` module implements a multi-strategy paper trading bot that monitors Bitcoin prediction markets on Kalshi. It tracks 7 different trading strategies simultaneously, recording all trades to CSV for backtesting analysis.
+
+## Configuration Constants
+
+<ParamField path="API_BASE" type="string" default="https://api.elections.kalshi.com/trade-api/v2">
+  Base URL for Kalshi trade API
+</ParamField>
+
+<ParamField path="SERIES_TICKER" type="string" default="KXBTC15M">
+  Market series to monitor (15-minute Bitcoin prediction markets)
+</ParamField>
+
+<ParamField path="POLL_SECONDS" type="int" default="5">
+  Polling interval in seconds between market checks
+</ParamField>
+
+<ParamField path="STAKE_USD" type="float" default="5.0">
+  Stake amount in USD per trade for simple strategies
+</ParamField>
+
+<ParamField path="MOMENTUM_WINDOW_SECONDS" type="int" default="60">
+  Lookback window for momentum strategy (1 minute)
+</ParamField>
+
+<ParamField path="MOMENTUM_15_WINDOW_SECONDS" type="int" default="900">
+  Lookback window for 15-minute momentum strategy
+</ParamField>
+
+<ParamField path="INITIAL_BANKROLL_USD" type="float" default="500">
+  Initial bankroll for consensus strategies (from env)
+</ParamField>
+
+<ParamField path="CONSENSUS_RISK_PCT" type="float" default="0.01">
+  Risk percentage per trade for consensus strategies (from env)
+</ParamField>
+
+## Core Functions
+
+### get_btc_price()
+
+Fetch the current Bitcoin spot price from Coinbase.
+
+<ResponseField name="price" type="float">
+  Current BTC/USD spot price
+</ResponseField>
+
+```python
+btc_price = get_btc_price()
+print(f"BTC: ${btc_price:,.2f}")
+```
+
+### get_open_market()
+
+Get the next expiring open KXBTC15M market from Kalshi.
+
+<ResponseField name="market" type="dict | None">
+  Market object with ticker, yes_ask, no_ask, close_time, or None if no open markets
+</ResponseField>
+
+```python
+market = get_open_market()
+if market:
+    print(f"Trading {market['ticker']}")
+    print(f"Prices: yes=${market['yes_ask']/100:.2f} no=${market['no_ask']/100:.2f}")
+```
+
+### get_market(ticker)
+
+Get a specific market by ticker symbol.
+
+<ParamField path="ticker" type="string" required>
+  Market ticker (e.g., "KXBTC15M-24DEC05-T1030")
+</ParamField>
+
+<ResponseField name="market" type="dict">
+  Market object including result field if settled
+</ResponseField>
+
+```python
+market = get_market("KXBTC15M-24DEC05-T1030")
+if market.get("result"):
+    print(f"Settled: {market['result']}")
+```
+
+### get_settled_side(market)
+
+Check if a market is settled and return the winning side.
+
+<ParamField path="market" type="dict" required>
+  Market object from Kalshi API
+</ParamField>
+
+<ResponseField name="result" type="str | None">
+  Returns "yes", "no", or None if not settled
+</ResponseField>
+
+```python
+market = get_market(ticker)
+result = get_settled_side(market)
+if result:
+    print(f"Market resolved: {result}")
+```
+
+## Trade Management
+
+### load_trades()
+
+Load all trades from the CSV file.
+
+<ResponseField name="trades" type="list[dict]">
+  List of trade records with all strategy data
+</ResponseField>
+
+```python
+trades = load_trades()
+print(f"Loaded {len(trades)} historical trades")
+```
+
+### save_trades(trades)
+
+Save all trades to CSV with complete field set.
+
+<ParamField path="trades" type="list[dict]" required>
+  List of trade dictionaries to persist
+</ParamField>
+
+```python
+trades.append(new_trade)
+save_trades(trades)
+```
+
+### calc_stats(trades, strategy=None)
+
+Calculate performance statistics for trades.
+
+<ParamField path="trades" type="list[dict]" required>
+  List of trade records
+</ParamField>
+
+<ParamField path="strategy" type="str">
+  Optional strategy name to filter by (e.g., "CONSENSUS", "MOMENTUM")
+</ParamField>
+
+<ResponseField name="stats" type="dict">
+  Statistics dict with keys: total_staked, total_profit, wins, losses, pending
+</ResponseField>
+
+```python
+stats = calc_stats(trades, "CONSENSUS")
+print(f"P&L: ${stats['total_profit']:+.2f}")
+print(f"Win rate: {stats['wins']}/{stats['wins'] + stats['losses']}")
+```
+
+## Consensus Strategy Functions
+
+### consensus_bankroll(trades)
+
+Calculate current consensus strategy bankroll from realized P&L.
+
+<ParamField path="trades" type="list[dict]" required>
+  All trade records
+</ParamField>
+
+<ResponseField name="bankroll" type="float">
+  Initial bankroll plus realized consensus profits
+</ResponseField>
+
+```python
+bankroll = consensus_bankroll(trades)
+print(f"Consensus bankroll: ${bankroll:.2f}")
+```
+
+### consensus_period_pnl(trades, now)
+
+Calculate daily and weekly P&L for consensus strategies.
+
+<ParamField path="trades" type="list[dict]" required>
+  All trade records
+</ParamField>
+
+<ParamField path="now" type="datetime" required>
+  Current datetime for period calculation
+</ParamField>
+
+<ResponseField name="daily_pnl" type="float">
+  Today's realized P&L
+</ResponseField>
+
+<ResponseField name="weekly_pnl" type="float">
+  This ISO week's realized P&L
+</ResponseField>
+
+```python
+from datetime import datetime, timezone
+now = datetime.now(timezone.utc)
+daily, weekly = consensus_period_pnl(trades, now)
+print(f"Today: ${daily:+.2f} | Week: ${weekly:+.2f}")
+```
+
+### rolling_consensus_metrics(trades)
+
+Calculate rolling performance metrics and break-even win rate.
+
+<ParamField path="trades" type="list[dict]" required>
+  All trade records
+</ParamField>
+
+<ResponseField name="metrics" type="dict">
+  Dict with keys: sample_size, win_rate, break_even_win_rate
+</ResponseField>
+
+```python
+metrics = rolling_consensus_metrics(trades)
+if metrics['sample_size'] >= 30:
+    wr = metrics['win_rate'] * 100
+    be = metrics['break_even_win_rate'] * 100
+    print(f"Win rate: {wr:.1f}% (need {be:.1f}% to break even)")
+```
+
+## Trading Strategies
+
+The bot implements 7 simultaneous paper trading strategies:
+
+1. **PREVIOUS**: Buy the same side as the previous market's result
+2. **MOMENTUM**: Buy based on BTC price direction over 60 seconds
+3. **CONSENSUS**: Only trade when PREVIOUS and MOMENTUM agree (with risk management)
+4. **MOMENTUM_15**: Buy based on BTC direction over 15 minutes
+5. **PREVIOUS_2**: Wait for PREVIOUS side at price ≤ $0.45
+6. **CONSENSUS_2**: Wait for CONSENSUS agreement at price ≤ $0.45
+7. **ARBITRAGE**: Buy immediately then hedge opposite side if profitable
+
+```python
+# Example: Running the bot
+from bot import main
+from dotenv import load_dotenv
+
+load_dotenv()
+main()
+```
+
+## Main Loop
+
+### main()
+
+Main bot loop that monitors markets and executes all strategies.
+
+- Polls for open markets every `POLL_SECONDS`
+- Tracks BTC price history for momentum signals
+- Executes trades when strategy conditions are met
+- Checks for settled markets and updates P&L
+- Enforces risk limits for consensus strategies
+
+```bash
+# Run the bot
+python bot.py
+```
+
+The bot will:
+- Load historical trades from CSV
+- Print initial statistics for all strategies
+- Monitor markets continuously
+- Execute trades according to each strategy's rules
+- Update and save trades as markets settle

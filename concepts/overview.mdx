@@ -1,0 +1,182 @@
+---
+title: "Trading Bot Concepts"
+description: "Core concepts and architecture of the Simple Kalshi Bot"
+---
+
+## What is Simple Kalshi Bot?
+
+The Simple Kalshi Bot is an automated trading system that operates on Kalshi's prediction markets, specifically targeting Bitcoin (BTC) 15-minute price movement markets (`KXBTC15M`).
+
+## How It Works
+
+The bot continuously monitors markets and executes trades based on multiple strategies:
+
+<Steps>
+  <Step title="Market Monitoring">
+    The bot polls Kalshi's API every few seconds to get the next expiring open market
+  </Step>
+  <Step title="Signal Generation">
+    Multiple strategies generate trading signals:
+    - **PREVIOUS**: Follows the result of the last settled market
+    - **MOMENTUM**: Analyzes BTC price direction over time windows
+    - **CONSENSUS**: Only trades when PREVIOUS and MOMENTUM agree
+    - **ARBITRAGE**: Exploits pricing inefficiencies
+  </Step>
+  <Step title="Trade Execution">
+    When conditions are met, the bot places buy orders and logs them
+  </Step>
+  <Step title="Settlement Tracking">
+    The bot checks pending trades for settlement and calculates profit/loss
+  </Step>
+</Steps>
+
+## Trading Strategies
+
+The bot implements seven distinct strategies in paper trading mode:
+
+### 1. PREVIOUS
+Buys the same side as the previous market's result.
+
+```python
+# From bot.py:383-412
+if pending_previous and ("PREVIOUS", ticker) not in traded_keys:
+    prev_market = get_market(pending_previous)
+    settled = get_settled_side(prev_market)
+    
+    if settled:
+        signals[ticker]["PREVIOUS"] = settled
+        price = yes_ask if settled == "yes" else no_ask
+        contracts = STAKE_USD / price if price > 0 else 0
+```
+
+### 2. MOMENTUM
+Analyzes BTC price direction over the last 60 seconds.
+
+```python
+# From bot.py:416-462
+cutoff = now - timedelta(seconds=MOMENTUM_WINDOW_SECONDS)
+old_prices = [(t, p) for t, p in btc_prices if t <= cutoff]
+
+if old_prices:
+    _, old_price = old_prices[-1]
+    _, current_price = btc_prices[-1]
+    
+    if current_price > old_price:
+        side = "yes"  # Price rising, bet UP
+    else:
+        side = "no"   # Price falling, bet DOWN
+```
+
+### 3. CONSENSUS
+
+<Info>
+The CONSENSUS strategy only trades when both PREVIOUS and MOMENTUM signals agree, providing higher confidence signals.
+</Info>
+
+This strategy includes sophisticated risk management:
+- Price ceiling enforcement
+- Dynamic position sizing based on bankroll
+- Daily and weekly loss caps
+- Rolling performance monitoring
+
+### 4. MOMENTUM_15
+Similar to MOMENTUM but uses a 15-minute (900 second) window instead of 60 seconds.
+
+### 5. PREVIOUS_2 & CONSENSUS_2
+Wait for favorable pricing (≤ $0.45) before executing their respective strategies.
+
+### 6. ARBITRAGE
+Buys immediately, then attempts to hedge the opposite side when profitable.
+
+## Risk Management
+
+<Warning>
+The bot includes multiple risk controls to prevent excessive losses:
+</Warning>
+
+### Bankroll Management
+```python
+# From bot.py:24-31
+INITIAL_BANKROLL_USD = float(os.getenv("INITIAL_BANKROLL_USD", "500"))
+CONSENSUS_RISK_PCT = float(os.getenv("CONSENSUS_RISK_PCT", "0.01"))
+CONSENSUS_MAX_RISK_PCT = float(os.getenv("CONSENSUS_MAX_RISK_PCT", "0.02"))
+```
+
+### Loss Caps
+```python
+# From bot.py:30-31
+CONSENSUS_DAILY_LOSS_CAP_R = float(os.getenv("CONSENSUS_DAILY_LOSS_CAP_R", "3"))
+CONSENSUS_WEEKLY_LOSS_CAP_R = float(os.getenv("CONSENSUS_WEEKLY_LOSS_CAP_R", "8"))
+```
+
+### Rolling Performance Monitoring
+The bot tracks a rolling window of trades and calculates:
+- Win rate
+- Break-even win rate (based on average win/loss amounts)
+- Automatically pauses trading when performance drops below break-even
+
+```python
+# From bot.py:188-218
+def rolling_consensus_metrics(trades):
+    settled = settled_consensus(trades)
+    window = settled[-CONSENSUS_ROLLING_WINDOW:]
+    profits = [float(t.get("profit_usd", 0)) for t in window]
+    
+    wins = [p for p in profits if p > 0]
+    losses = [p for p in profits if p <= 0]
+    
+    if wins and losses:
+        avg_win = sum(wins) / len(wins)
+        avg_loss = abs(sum(losses) / len(losses))
+        break_even = avg_loss / (avg_win + avg_loss)
+```
+
+## Data Persistence
+
+All trades are logged to a CSV file with detailed information:
+
+```python
+# From bot.py:97-105
+fieldnames = [
+    "time", "strategy", "previous_ticker", "previous_result", 
+    "buy_ticker", "buy_side", "stake_usd", "price_usd", 
+    "contracts", "fee_usd", "gross_profit_usd",
+    "outcome", "payout_usd", "profit_usd"
+]
+```
+
+<Note>
+The default CSV location is `data/mock_trades.csv` for paper trading.
+</Note>
+
+## Market Data Sources
+
+### Kalshi API
+Fetches market information, prices, and settlement data:
+```python
+# From bot.py:11
+API_BASE = "https://api.elections.kalshi.com/trade-api/v2"
+```
+
+### Coinbase API
+Retrieves real-time BTC prices for momentum calculations:
+```python
+# From bot.py:34-41
+def get_btc_price():
+    resp = requests.get(
+        "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+        timeout=10
+    )
+    return float(resp.json()["data"]["amount"])
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Paper Trading" icon="flask" href="/concepts/paper-trading">
+    Learn how to run the bot in simulation mode
+  </Card>
+  <Card title="Real Trading" icon="rocket" href="/concepts/real-trading">
+    Deploy the bot with real Kalshi API credentials
+  </Card>
+</CardGroup>

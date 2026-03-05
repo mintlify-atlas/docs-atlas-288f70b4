@@ -1,0 +1,268 @@
+---
+title: "Trading Strategies"
+description: "Documentation of all trading strategies implemented in the bot"
+---
+
+## Overview
+
+The Simple Kalshi Bot implements 7 distinct paper trading strategies that operate simultaneously on Bitcoin prediction markets. Each strategy uses different signals and risk parameters.
+
+## Strategy Functions
+
+All strategies are implemented in `bot.py` within the main trading loop. This page documents the strategy logic and parameters.
+
+## 1. PREVIOUS Strategy
+
+**Logic:** Buy the same side (yes/no) as the previous market's settled result.
+
+**Hypothesis:** Market outcomes show short-term autocorrelation (momentum carries across markets).
+
+**Parameters:**
+- Stake: `STAKE_USD` ($5 default)
+- Entry: Immediate on market change
+- Exit: Market settlement
+
+**Implementation:**
+```python
+if pending_previous:
+    prev_market = get_market(pending_previous)
+    settled = get_settled_side(prev_market)
+    if settled:
+        signals[ticker]["PREVIOUS"] = settled
+        price = yes_ask if settled == "yes" else no_ask
+        contracts = STAKE_USD / price
+        # Execute trade...
+```
+
+## 2. MOMENTUM Strategy
+
+**Logic:** Buy based on BTC price direction over the last 60 seconds.
+
+**Hypothesis:** Short-term Bitcoin price momentum predicts the next 15-minute market outcome.
+
+**Parameters:**
+- Stake: `STAKE_USD` ($5 default)
+- Lookback: `MOMENTUM_WINDOW_SECONDS` (60s)
+- Signal:
+  - BTC price rising → Buy YES (price will be higher)
+  - BTC price falling → Buy NO (price will be lower)
+
+**Implementation:**
+```python
+cutoff = now - timedelta(seconds=MOMENTUM_WINDOW_SECONDS)
+old_prices = [(t, p) for t, p in btc_prices if t <= cutoff]
+if old_prices:
+    _, old_price = old_prices[-1]
+    _, current_price = btc_prices[-1]
+    side = "yes" if current_price > old_price else "no"
+    signals[ticker]["MOMENTUM"] = side
+```
+
+## 3. CONSENSUS Strategy
+
+**Logic:** Only trade when PREVIOUS and MOMENTUM signals agree. Includes full risk management.
+
+**Hypothesis:** Combined signals reduce noise and improve edge.
+
+**Parameters:**
+- Bankroll: `INITIAL_BANKROLL_USD` (env var, default $500)
+- Risk per trade: `CONSENSUS_RISK_PCT` (env var, default 1%)
+- Max risk per trade: `CONSENSUS_MAX_RISK_PCT` (default 2%)
+- Max price: `CONSENSUS_MAX_PRICE` (default $0.55)
+- Daily loss cap: `CONSENSUS_DAILY_LOSS_CAP_R` * R (default 3R)
+- Weekly loss cap: `CONSENSUS_WEEKLY_LOSS_CAP_R` * R (default 8R)
+- Rolling window: `CONSENSUS_ROLLING_WINDOW` trades (default 30)
+
+**Risk Management Rules:**
+
+1. **Price Filter:** Skip if ask price > `CONSENSUS_MAX_PRICE`
+2. **Bankroll Check:** Bankroll = initial + realized P&L
+3. **Loss Caps:** Stop trading if daily/weekly loss exceeds caps
+4. **Win Rate Filter:** Skip if rolling win rate < break-even rate
+5. **Position Sizing:** Stake = min(risk%, max_risk%, available_cash)
+
+**Implementation:**
+```python
+if prev_signal and mom_signal and prev_signal == mom_signal:
+    side = prev_signal
+    price = yes_ask if side == "yes" else no_ask
+    
+    # Check price limit
+    if price > CONSENSUS_MAX_PRICE:
+        print("Skip - price too high")
+        continue
+    
+    # Check bankroll
+    bankroll = consensus_bankroll(trades)
+    if bankroll <= 0:
+        print("Skip - bankroll depleted")
+        continue
+    
+    # Check loss caps
+    day_pnl, week_pnl = consensus_period_pnl(trades, now)
+    # ... check limits ...
+    
+    # Check win rate vs break-even
+    rolling = rolling_consensus_metrics(trades)
+    if rolling['win_rate'] < rolling['break_even_win_rate']:
+        print("Skip - underperforming")
+        continue
+    
+    # Position sizing
+    target_stake = bankroll * CONSENSUS_RISK_PCT
+    max_stake = bankroll * CONSENSUS_MAX_RISK_PCT
+    stake = min(target_stake, max_stake, bankroll)
+    contracts = int(stake / price)
+```
+
+## 4. MOMENTUM_15 Strategy
+
+**Logic:** Buy based on BTC price direction over 15 minutes instead of 60 seconds.
+
+**Hypothesis:** Longer timeframe momentum may have better signal quality.
+
+**Parameters:**
+- Stake: `STAKE_USD` ($5)
+- Lookback: `MOMENTUM_15_WINDOW_SECONDS` (900s = 15 min)
+- Signal: Same as MOMENTUM but longer window
+
+**Implementation:**
+```python
+cutoff = now - timedelta(seconds=MOMENTUM_15_WINDOW_SECONDS)
+old_prices = [(t, p) for t, p in btc_prices if t <= cutoff]
+if old_prices:
+    side = "yes" if current_price > old_price else "no"
+    signals[ticker]["MOMENTUM_15"] = side
+```
+
+## 5. PREVIOUS_2 Strategy
+
+**Logic:** Wait for PREVIOUS signal side to reach a good price (≤ $0.45).
+
+**Hypothesis:** Being patient for better prices improves edge.
+
+**Parameters:**
+- Stake: `STAKE_USD` ($5)
+- Max price: `DEAL_MAX_PRICE` ($0.45)
+- Signal: PREVIOUS result
+
+**Implementation:**
+```python
+prev_signal = signals[ticker].get("PREVIOUS")
+if prev_signal:
+    price = yes_ask if prev_signal == "yes" else no_ask
+    if 0 < price <= DEAL_MAX_PRICE:
+        # Execute trade at good price
+```
+
+## 6. CONSENSUS_2 Strategy
+
+**Logic:** Combination of CONSENSUS risk management + PREVIOUS_2 price waiting.
+
+**Hypothesis:** Best of both worlds - signal quality and price discipline.
+
+**Parameters:**
+- All CONSENSUS risk management rules
+- Max price: `DEAL_MAX_PRICE` ($0.45)
+- Signal: PREVIOUS + MOMENTUM agreement
+
+**Implementation:**
+```python
+if prev_signal and mom_signal and prev_signal == mom_signal:
+    side = prev_signal
+    price = yes_ask if side == "yes" else no_ask
+    
+    # Wait for good price
+    if 0 < price <= DEAL_MAX_PRICE:
+        # Apply full CONSENSUS risk management
+        # Then execute trade
+```
+
+## 7. ARBITRAGE Strategy
+
+**Logic:** Two-legged arbitrage using synthetic straddle.
+
+**Hypothesis:** Market inefficiencies create risk-free profit opportunities.
+
+**Parameters:**
+- First leg stake: `STAKE_USD` ($5)
+- Max bet for hedge: `ARBITRAGE_MAX_BET_USD` ($10)
+- Minimum edge: > 0 (yes_ask + no_ask < 1.00)
+
+**How It Works:**
+
+1. **First Leg:** Buy cheaper side immediately (yes or no)
+2. **Wait for Edge:** Monitor opposite side price
+3. **Hedge Leg:** If `yes_ask + no_ask < 1.00`, buy opposite side
+4. **Guaranteed Profit:** Win on one side, locked in edge
+
+**Implementation:**
+```python
+# First leg
+first_side = "yes" if yes_ask <= no_ask else "no"
+first_price = yes_ask if first_side == "yes" else no_ask
+contracts = STAKE_USD / first_price
+# Record position
+
+# Hedge leg (later tick)
+opposite_side = "no" if first_side == "yes" else "yes"
+opposite_price = no_ask if opposite_side == "no" else yes_ask
+edge = 1.0 - (first_price + opposite_price)
+
+if edge > 0:
+    # Buy opposite side, lock in guaranteed profit
+    hedge_contracts = min(first_contracts, MAX_BET / opposite_price)
+    guaranteed_profit = hedge_contracts * edge
+```
+
+## Strategy Performance Tracking
+
+All strategies record trades to CSV with these fields:
+
+```python
+fieldnames = [
+    "time",              # Trade timestamp
+    "strategy",          # Strategy name
+    "previous_ticker",   # Previous market ticker
+    "previous_result",   # Previous result or signal info
+    "buy_ticker",        # Market traded
+    "buy_side",          # yes or no
+    "stake_usd",         # USD staked
+    "price_usd",         # Price paid per contract
+    "contracts",         # Number of contracts
+    "fee_usd",           # Fees (consensus only)
+    "gross_profit_usd",  # Profit before fees
+    "outcome",           # WIN or LOSS (after settlement)
+    "payout_usd",        # Payout from winning contracts
+    "profit_usd"         # Net profit after fees
+]
+```
+
+## Comparing Strategies
+
+Use `calc_stats()` to compare performance:
+
+```python
+trades = load_trades()
+
+for strategy in ["PREVIOUS", "MOMENTUM", "CONSENSUS", 
+                 "MOMENTUM_15", "PREVIOUS_2", "CONSENSUS_2", "ARBITRAGE"]:
+    stats = calc_stats(trades, strategy)
+    print(f"{strategy}:")
+    print(f"  P&L: ${stats['total_profit']:+.2f}")
+    print(f"  Record: {stats['wins']}W-{stats['losses']}L")
+    print(f"  Pending: {stats['pending']}")
+```
+
+## Risk Management Best Practices
+
+The CONSENSUS strategies implement comprehensive risk management:
+
+1. **Price Limits:** Never overpay (max $0.55 or $0.45)
+2. **Bankroll Tracking:** Dynamic position sizing based on realized P&L
+3. **Loss Caps:** Stop trading after daily/weekly drawdown limits
+4. **Win Rate Monitoring:** Pause if underperforming vs break-even
+5. **Position Limits:** Cap contracts to prevent oversized bets
+6. **Fee Accounting:** Track and subtract fees from profit
+
+Simple strategies (PREVIOUS, MOMENTUM, etc.) use fixed stakes for cleaner comparison and backtesting.

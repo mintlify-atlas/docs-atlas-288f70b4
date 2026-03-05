@@ -1,0 +1,295 @@
+---
+title: "kalshi_client.py"
+description: "Authenticated Kalshi API client with RSA-PSS signature authentication"
+---
+
+## Overview
+
+The `kalshi_client.py` module provides a reusable authenticated client for the Kalshi prediction market API. It handles RSA-PSS request signing, API endpoints, and order placement.
+
+## Environment Configuration
+
+Required environment variables:
+
+- `KALSHI_API_KEY_ID` - Your API key ID from Kalshi
+- `KALSHI_PRIVATE_KEY_PATH` - Path to RSA private key file
+- `KALSHI_USE_DEMO` - "true" for demo API, "false" for production
+
+## Helper Functions
+
+### get_api_base()
+
+Determine the API base URL based on environment configuration.
+
+<ResponseField name="url" type="string">
+  Returns demo or production API base URL
+</ResponseField>
+
+```python
+api_base = get_api_base()
+print(f"Using API: {api_base}")
+# Demo: https://demo-api.kalshi.co/trade-api/v2
+# Prod: https://api.elections.kalshi.com/trade-api/v2
+```
+
+### load_private_key()
+
+Load the RSA private key from the configured file path.
+
+<ResponseField name="private_key" type="RSAPrivateKey">
+  Loaded private key object for signing requests
+</ResponseField>
+
+```python
+from kalshi_client import load_private_key
+
+key = load_private_key()
+print("Private key loaded successfully")
+```
+
+## KalshiClient Class
+
+### Constructor
+
+Initialize an authenticated Kalshi API client.
+
+```python
+from kalshi_client import KalshiClient
+from dotenv import load_dotenv
+
+load_dotenv()
+client = KalshiClient()
+print(f"Connected to {client.api_base}")
+```
+
+**Raises:**
+- `ValueError` if required environment variables are missing
+
+### _sign_request(method, path, timestamp)
+
+Generate RSA-PSS signature for API authentication.
+
+<ParamField path="method" type="string" required>
+  HTTP method (GET, POST, etc.)
+</ParamField>
+
+<ParamField path="path" type="string" required>
+  API path including query parameters
+</ParamField>
+
+<ParamField path="timestamp" type="string" required>
+  Unix timestamp in milliseconds as string
+</ParamField>
+
+<ResponseField name="signature" type="string">
+  Base64-encoded RSA-PSS signature
+</ResponseField>
+
+**Note:** This is an internal method. Use the high-level methods below instead.
+
+### _request(method, path, **kwargs)
+
+Make an authenticated API request with automatic signing.
+
+<ParamField path="method" type="string" required>
+  HTTP method
+</ParamField>
+
+<ParamField path="path" type="string" required>
+  API endpoint path
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Additional arguments passed to requests.request()
+</ParamField>
+
+<ResponseField name="response" type="dict">
+  Parsed JSON response from API
+</ResponseField>
+
+```python
+# Internal usage example
+resp = client._request("GET", "/portfolio/balance", timeout=20)
+print(f"Balance: ${resp['balance']/100:.2f}")
+```
+
+## Public API Methods
+
+### get_balance()
+
+Retrieve account balance.
+
+<ResponseField name="balance" type="dict">
+  Balance object with balance in cents
+</ResponseField>
+
+```python
+balance = client.get_balance()
+usd_balance = balance['balance'] / 100
+print(f"Account balance: ${usd_balance:.2f}")
+```
+
+### get_markets(series_ticker=None, status="open", limit=200, cursor=None)
+
+Fetch markets with optional filtering.
+
+<ParamField path="series_ticker" type="string">
+  Filter by series (e.g., "KXBTC15M")
+</ParamField>
+
+<ParamField path="status" type="string" default="open">
+  Market status: "open", "closed", "settled"
+</ParamField>
+
+<ParamField path="limit" type="int" default="200">
+  Maximum markets to return
+</ParamField>
+
+<ParamField path="cursor" type="string">
+  Pagination cursor for next page
+</ParamField>
+
+<ResponseField name="markets" type="dict">
+  API response with markets array and cursor
+</ResponseField>
+
+```python
+# Get all open KXBTC15M markets
+resp = client.get_markets(series_ticker="KXBTC15M", status="open")
+markets = resp.get("markets", [])
+print(f"Found {len(markets)} open markets")
+
+for market in markets[:5]:
+    print(f"  {market['ticker']}: yes=${market['yes_ask']/100:.2f}")
+```
+
+### get_market(ticker)
+
+Get details for a specific market.
+
+<ParamField path="ticker" type="string" required>
+  Market ticker symbol
+</ParamField>
+
+<ResponseField name="market" type="dict">
+  Market object with all details
+</ResponseField>
+
+```python
+market = client.get_market("KXBTC15M-24DEC05-T1030")
+print(f"Status: {market['status']}")
+print(f"Result: {market.get('result', 'pending')}")
+```
+
+### get_events(status="open", limit=200, cursor=None)
+
+Fetch events (collections of related markets).
+
+<ParamField path="status" type="string" default="open">
+  Event status filter
+</ParamField>
+
+<ParamField path="limit" type="int" default="200">
+  Maximum events to return
+</ParamField>
+
+<ParamField path="cursor" type="string">
+  Pagination cursor
+</ParamField>
+
+<ResponseField name="events" type="dict">
+  API response with events array
+</ResponseField>
+
+```python
+events = client.get_events(status="open", limit=50)
+for event in events.get("events", []):
+    print(f"Event: {event['title']}")
+```
+
+### place_order(ticker, side, contracts, price_cents, dry_run=False)
+
+Place a limit order on Kalshi.
+
+<ParamField path="ticker" type="string" required>
+  Market ticker to trade
+</ParamField>
+
+<ParamField path="side" type="string" required>
+  "yes" or "no"
+</ParamField>
+
+<ParamField path="contracts" type="int" required>
+  Number of contracts to buy
+</ParamField>
+
+<ParamField path="price_cents" type="int" required>
+  Limit price per contract in cents (1-99)
+</ParamField>
+
+<ParamField path="dry_run" type="bool" default="False">
+  If True, simulate order without executing
+</ParamField>
+
+<ResponseField name="order" type="dict">
+  Order response with order_id and status
+</ResponseField>
+
+```python
+# Place a real order
+order = client.place_order(
+    ticker="KXBTC15M-24DEC05-T1030",
+    side="yes",
+    contracts=10,
+    price_cents=55,  # $0.55 per contract
+    dry_run=False
+)
+print(f"Order placed: {order['order']['order_id']}")
+print(f"Status: {order['order']['status']}")
+
+# Dry run for testing
+order = client.place_order(
+    ticker="KXBTC15M-24DEC05-T1030",
+    side="no",
+    contracts=5,
+    price_cents=40,
+    dry_run=True
+)
+print(f"Simulated order: {order['order']['order_id']}")
+```
+
+## Authentication Flow
+
+The client automatically handles authentication for all requests:
+
+1. Generate timestamp (Unix milliseconds)
+2. Create signature message: `{timestamp}{method}/trade-api/v2{path}`
+3. Sign with RSA-PSS (SHA256, MAX_LENGTH salt)
+4. Base64 encode signature
+5. Add headers:
+   - `KALSHI-ACCESS-KEY`: API key ID
+   - `KALSHI-ACCESS-SIGNATURE`: Signature
+   - `KALSHI-ACCESS-TIMESTAMP`: Timestamp
+
+```python
+# Example: All methods use automatic authentication
+client = KalshiClient()
+
+# These calls are automatically signed
+balance = client.get_balance()
+markets = client.get_markets(series_ticker="KXBTC15M")
+order = client.place_order("TICKER", "yes", 10, 50)
+```
+
+## Error Handling
+
+```python
+try:
+    client = KalshiClient()
+    balance = client.get_balance()
+except ValueError as e:
+    print(f"Configuration error: {e}")
+except requests.HTTPError as e:
+    print(f"API error: {e.response.status_code}")
+    print(e.response.text)
+```

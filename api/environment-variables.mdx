@@ -1,0 +1,314 @@
+---
+title: "Environment Variables"
+description: "Complete reference for all environment variables used in Simple Kalshi Bot"
+---
+
+## Overview
+
+Simple Kalshi Bot uses environment variables for configuration. Store these in a `.env` file in the project root.
+
+## Required Variables
+
+### KALSHI_API_KEY_ID
+
+<ParamField path="KALSHI_API_KEY_ID" type="string" required>
+  Your Kalshi API key ID from account profile
+</ParamField>
+
+**Where to get:**
+1. Log in to Kalshi
+2. Go to Profile → API Keys
+3. Create new API key
+4. Copy the key ID
+
+```bash
+KALSHI_API_KEY_ID=your-api-key-id-here
+```
+
+### KALSHI_PRIVATE_KEY_PATH
+
+<ParamField path="KALSHI_PRIVATE_KEY_PATH" type="string" required>
+  Path to RSA private key file for API authentication
+</ParamField>
+
+**Setup:**
+1. Generate RSA key pair when creating API key in Kalshi
+2. Download private key file
+3. Store securely (e.g., `~/.key/kalshi/key`)
+4. Set path in environment variable
+
+```bash
+KALSHI_PRIVATE_KEY_PATH=~/.key/kalshi/key
+```
+
+## API Configuration
+
+### KALSHI_USE_DEMO
+
+<ParamField path="KALSHI_USE_DEMO" type="string" default="true">
+  Use demo API ("true") or production API ("false")
+</ParamField>
+
+**Values:**
+- `"true"`: https://demo-api.kalshi.co/trade-api/v2 (paper trading)
+- `"false"`: https://api.elections.kalshi.com/trade-api/v2 (real money)
+
+```bash
+# Safe for testing
+KALSHI_USE_DEMO=true
+
+# Real trading (be careful!)
+KALSHI_USE_DEMO=false
+```
+
+### KALSHI_EVENT_TICKER_PREFIX
+
+<ParamField path="KALSHI_EVENT_TICKER_PREFIX" type="string" default="KXBTC15M">
+  Market series ticker to monitor
+</ParamField>
+
+**Common values:**
+- `KXBTC15M`: 15-minute Bitcoin price prediction
+- `KXBTC-24H`: 24-hour Bitcoin price
+- Custom series ticker
+
+```bash
+KALSHI_EVENT_TICKER_PREFIX=KXBTC15M
+```
+
+## Trading Configuration
+
+### DRY_RUN
+
+<ParamField path="DRY_RUN" type="string" default="true">
+  Simulate orders without executing ("true" or "false")
+</ParamField>
+
+**Safety feature:**
+- `"true"`: Generate order IDs but don't send to API
+- `"false"`: Execute real orders
+
+```bash
+# Keep this true until fully tested!
+DRY_RUN=true
+```
+
+### STAKE_USD
+
+<ParamField path="STAKE_USD" type="float" default="5.0">
+  Stake amount per trade for simple strategies (USD)
+</ParamField>
+
+```bash
+STAKE_USD=5.0
+```
+
+### POLL_SECONDS
+
+<ParamField path="POLL_SECONDS" type="int" default="5">
+  Polling interval between market checks (seconds)
+</ParamField>
+
+```bash
+POLL_SECONDS=5
+```
+
+### MOMENTUM_WINDOW_SECONDS
+
+<ParamField path="MOMENTUM_WINDOW_SECONDS" type="int" default="60">
+  BTC price lookback window for momentum strategy (seconds)
+</ParamField>
+
+```bash
+MOMENTUM_WINDOW_SECONDS=60
+```
+
+## Consensus Strategy Configuration
+
+### INITIAL_BANKROLL_USD
+
+<ParamField path="INITIAL_BANKROLL_USD" type="float" default="500.0">
+  Initial bankroll for consensus strategies (USD)
+</ParamField>
+
+```bash
+INITIAL_BANKROLL_USD=500.0
+```
+
+### CONSENSUS_RISK_PCT
+
+<ParamField path="CONSENSUS_RISK_PCT" type="float" default="0.01">
+  Risk percentage per trade for consensus strategies (0.01 = 1%)
+</ParamField>
+
+```bash
+CONSENSUS_RISK_PCT=0.01
+```
+
+### CONSENSUS_MAX_RISK_PCT
+
+<ParamField path="CONSENSUS_MAX_RISK_PCT" type="float" default="0.02">
+  Maximum risk per trade (0.02 = 2%)
+</ParamField>
+
+```bash
+CONSENSUS_MAX_RISK_PCT=0.02
+```
+
+### CONSENSUS_MAX_PRICE
+
+<ParamField path="CONSENSUS_MAX_PRICE" type="float" default="0.55">
+  Maximum contract price for consensus trades (USD)
+</ParamField>
+
+```bash
+CONSENSUS_MAX_PRICE=0.55
+```
+
+### CONSENSUS_FEE_PCT
+
+<ParamField path="CONSENSUS_FEE_PCT" type="float" default="0.0">
+  Trading fee percentage to subtract from profit (0.0 = 0%)
+</ParamField>
+
+```bash
+CONSENSUS_FEE_PCT=0.0
+```
+
+### CONSENSUS_ROLLING_WINDOW
+
+<ParamField path="CONSENSUS_ROLLING_WINDOW" type="int" default="30">
+  Number of recent trades to analyze for win rate
+</ParamField>
+
+```bash
+CONSENSUS_ROLLING_WINDOW=30
+```
+
+### CONSENSUS_DAILY_LOSS_CAP_R
+
+<ParamField path="CONSENSUS_DAILY_LOSS_CAP_R" type="float" default="3.0">
+  Daily loss limit in R multiples (3.0 = 3× risk amount)
+</ParamField>
+
+```bash
+CONSENSUS_DAILY_LOSS_CAP_R=3.0
+```
+
+### CONSENSUS_WEEKLY_LOSS_CAP_R
+
+<ParamField path="CONSENSUS_WEEKLY_LOSS_CAP_R" type="float" default="8.0">
+  Weekly loss limit in R multiples (8.0 = 8× risk amount)
+</ParamField>
+
+```bash
+CONSENSUS_WEEKLY_LOSS_CAP_R=8.0
+```
+
+## File Paths
+
+### MOCK_TRADES_CSV_PATH
+
+<ParamField path="MOCK_TRADES_CSV_PATH" type="string" default="data/mock_trades.csv">
+  CSV file path for bot.py trade history
+</ParamField>
+
+```bash
+MOCK_TRADES_CSV_PATH=data/mock_trades.csv
+```
+
+### CONSENSUS_TRADES_CSV
+
+<ParamField path="CONSENSUS_TRADES_CSV" type="string" default="data/consensus_trades.csv">
+  CSV file path for consensus.py trade history
+</ParamField>
+
+```bash
+CONSENSUS_TRADES_CSV=data/consensus_trades.csv
+```
+
+## Complete Example .env File
+
+```bash
+# Kalshi API credentials
+KALSHI_API_KEY_ID=your-api-key-id
+KALSHI_PRIVATE_KEY_PATH=~/.key/kalshi/key
+
+# Environment: true = demo, false = production
+KALSHI_USE_DEMO=true
+
+# Trading safety
+DRY_RUN=true
+
+# Stake per trade in USD
+STAKE_USD=5
+
+# Market series to watch
+KALSHI_EVENT_TICKER_PREFIX=KXBTC15M
+
+# Polling interval in seconds
+POLL_SECONDS=5
+
+# Lookback window for BTC momentum strategy
+MOMENTUM_WINDOW_SECONDS=60
+
+# Consensus strategy configuration
+INITIAL_BANKROLL_USD=500
+CONSENSUS_RISK_PCT=0.01
+CONSENSUS_MAX_RISK_PCT=0.02
+CONSENSUS_MAX_PRICE=0.55
+CONSENSUS_FEE_PCT=0.0
+CONSENSUS_ROLLING_WINDOW=30
+CONSENSUS_DAILY_LOSS_CAP_R=3
+CONSENSUS_WEEKLY_LOSS_CAP_R=8
+
+# Output CSV paths
+MOCK_TRADES_CSV_PATH=data/mock_trades.csv
+CONSENSUS_TRADES_CSV=data/consensus_trades.csv
+```
+
+## Loading Environment Variables
+
+All modules use `python-dotenv` to load variables:
+
+```python
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# Access variables
+api_key = os.getenv("KALSHI_API_KEY_ID")
+use_demo = os.getenv("KALSHI_USE_DEMO", "true").lower() == "true"
+stake = float(os.getenv("STAKE_USD", "5.0"))
+```
+
+## Security Best Practices
+
+1. **Never commit `.env` to git**
+   ```bash
+   echo ".env" >> .gitignore
+   ```
+
+2. **Use `.env.example` for documentation**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your actual credentials
+   ```
+
+3. **Protect private key file**
+   ```bash
+   chmod 600 ~/.key/kalshi/key
+   ```
+
+4. **Start with demo + dry run**
+   ```bash
+   KALSHI_USE_DEMO=true
+   DRY_RUN=true
+   ```
+
+5. **Test thoroughly before production**
+   - Run demo API for days/weeks
+   - Verify P&L calculations
+   - Test all edge cases
+   - Only then switch to production

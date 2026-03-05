@@ -1,0 +1,266 @@
+---
+title: "Evolution"
+description: "Selection, crossover, and mutation functions for genetic algorithm"
+---
+
+## Overview
+
+The evolution module implements the genetic algorithm mechanics: fitness evaluation, tournament selection, crossover, mutation, and generation advancement.
+
+## Fitness Evaluation
+
+### evaluate_fitness(bot)
+
+Calculate fitness score for a bot based on ROI.
+
+<ParamField path="bot" type="GeneticBot" required>
+  Bot instance to evaluate
+</ParamField>
+
+<ResponseField name="fitness" type="float">
+  ROI percentage, or INACTIVE_FITNESS_PENALTY if insufficient trades
+</ResponseField>
+
+**Fitness function:**
+- If `n_settled < MIN_SETTLED_TRADES`: return `-100.0` (penalty)
+- Otherwise: return `roi_pct` (realized profit / initial bankroll × 100)
+
+```python
+from genetic.evolution import evaluate_fitness
+from genetic.bot import GeneticBot
+
+fitness = evaluate_fitness(bot)
+if fitness == -100.0:
+    print(f"Bot {bot.bot_id}: INACTIVE (not enough trades)")
+else:
+    print(f"Bot {bot.bot_id}: {fitness:+.2f}% ROI")
+```
+
+## Selection
+
+### select_parent(population)
+
+Select one parent using tournament selection.
+
+<ParamField path="population" type="list[GeneticBot]" required>
+  Current population of bots
+</ParamField>
+
+<ResponseField name="parent" type="GeneticBot">
+  Selected parent bot
+</ResponseField>
+
+**Algorithm:**
+1. Randomly sample `TOURNAMENT_SIZE` bots from population
+2. Return the bot with highest fitness
+
+```python
+from genetic.evolution import select_parent
+
+parent = select_parent(population)
+print(f"Selected parent: {parent.genome.id}")
+print(f"Parent fitness: {evaluate_fitness(parent):+.2f}%")
+```
+
+## Genetic Operators
+
+### crossover(parent_a, parent_b, gen_num)
+
+Create a child genome by uniform crossover of two parents.
+
+<ParamField path="parent_a" type="Genome" required>
+  First parent genome
+</ParamField>
+
+<ParamField path="parent_b" type="Genome" required>
+  Second parent genome
+</ParamField>
+
+<ParamField path="gen_num" type="int" required>
+  Generation number for child
+</ParamField>
+
+<ResponseField name="child" type="Genome">
+  New child genome with mixed genes
+</ResponseField>
+
+**Algorithm:**
+- For each gene: randomly pick from parent_a (50%) or parent_b (50%)
+- Child inherits IDs of both parents
+
+```python
+from genetic.evolution import crossover
+from genetic.genome import Genome
+
+parent_a = Genome.random()
+parent_b = Genome.random()
+
+child = crossover(parent_a, parent_b, gen_num=5)
+print(f"Child ID: {child.id}")
+print(f"Parents: {child.parent_ids}")
+print(f"Signal type: {child.signal_type:.3f}")
+```
+
+### mutate(genome)
+
+Apply Gaussian mutation to genome.
+
+<ParamField path="genome" type="Genome" required>
+  Genome to mutate (will be deep copied)
+</ParamField>
+
+<ResponseField name="mutated" type="Genome">
+  New genome with mutations applied
+</ResponseField>
+
+**Algorithm:**
+- For each gene:
+  - With probability `MUTATION_RATE` (default 15%):
+    - Add Gaussian noise: N(0, `MUTATION_SIGMA`)
+    - Clamp result to [0.0, 1.0]
+
+```python
+from genetic.evolution import mutate
+from genetic.genome import Genome
+
+original = Genome.random()
+mutated = mutate(original)
+
+# Count differences
+diffs = 0
+for gene in Genome.gene_names():
+    if getattr(original, gene) != getattr(mutated, gene):
+        diffs += 1
+
+print(f"Mutated {diffs} out of {len(Genome.gene_names())} genes")
+```
+
+## Evolution Pipeline
+
+### evolve(population)
+
+Produce the next generation from the current population.
+
+<ParamField path="population" type="list[GeneticBot]" required>
+  Current generation of bots
+</ParamField>
+
+<ResponseField name="next_gen" type="list[Genome]">
+  List of genomes for next generation (size = POPULATION_SIZE)
+</ResponseField>
+
+**Algorithm:**
+
+1. **Sort by fitness** (high to low)
+2. **Elitism:** Keep top `ELITE_COUNT` genomes unchanged (default 5)
+3. **Breeding:** Fill remaining slots:
+   - Select parent via tournament
+   - With prob `CROSSOVER_RATE` (70%): crossover with second parent
+   - Otherwise: clone parent
+   - Apply mutation
+4. **Immigration:** Add `IMMIGRATION_COUNT` random genomes (default 5)
+
+```python
+from genetic.evolution import evolve
+
+# After generation completes
+next_genomes = evolve(population)
+
+print(f"Generated {len(next_genomes)} genomes for next generation")
+for i, genome in enumerate(next_genomes[:5]):
+    print(f"  {i+1}. {genome.id} (gen {genome.generation}) parents={genome.parent_ids}")
+```
+
+## Evolution Configuration
+
+All constants are defined in `genetic/config.py`:
+
+```python
+# Population
+POPULATION_SIZE = 100
+
+# Evolution
+ELITE_COUNT = 5          # Top N survive unchanged
+TOURNAMENT_SIZE = 7      # Tournament selection pressure
+CROSSOVER_RATE = 0.7     # Probability of crossover vs clone
+MUTATION_RATE = 0.15     # Per-gene mutation probability
+MUTATION_SIGMA = 0.10    # Gaussian stddev for perturbation
+IMMIGRATION_COUNT = 5    # Random new genomes each generation
+
+# Fitness
+MIN_SETTLED_TRADES = 5
+INACTIVE_FITNESS_PENALTY = -100.0
+```
+
+## Example: Full Evolution Cycle
+
+```python
+from genetic.evolution import evolve, evaluate_fitness
+from genetic.bot import GeneticBot
+from genetic.genome import Genome
+
+# Assume we have a population that just finished trading
+population: list[GeneticBot] = [...]
+
+# Evaluate and rank
+ranked = sorted(population, key=evaluate_fitness, reverse=True)
+print("Top 5 performers:")
+for i, bot in enumerate(ranked[:5], 1):
+    fitness = evaluate_fitness(bot)
+    stats = bot.account
+    print(f"{i}. {bot.genome.id}: {fitness:+.2f}% ({stats.wins}W-{stats.n_settled-stats.wins}L)")
+
+print("\nBottom 5:")
+for i, bot in enumerate(ranked[-5:], 1):
+    fitness = evaluate_fitness(bot)
+    print(f"{i}. {bot.genome.id}: {fitness:+.2f}%")
+
+# Evolve
+print("\nEvolving...")
+next_genomes = evolve(population)
+
+print(f"\nNext generation: {len(next_genomes)} genomes")
+print(f"  Elite: {sum(1 for g in next_genomes if len(g.parent_ids) == 1)}")
+print(f"  Crossover: {sum(1 for g in next_genomes if len(g.parent_ids) == 2)}")
+print(f"  Immigration: {sum(1 for g in next_genomes if not g.parent_ids)}")
+```
+
+## Genetic Diversity
+
+The algorithm maintains diversity through:
+
+1. **Tournament selection:** Allows weaker genomes to reproduce
+2. **Mutation:** Introduces noise to prevent convergence
+3. **Immigration:** Injects fresh random genomes every generation
+4. **Crossover:** Mixes genes from different lineages
+
+```python
+# Measure diversity in population
+from genetic.genome import Genome
+
+def genome_diversity(genomes: list[Genome]) -> dict:
+    """Calculate diversity metrics."""
+    n = len(genomes)
+    gene_variances = {}
+    
+    for gene_name in Genome.gene_names():
+        values = [getattr(g, gene_name) for g in genomes]
+        mean = sum(values) / n
+        variance = sum((v - mean) ** 2 for v in values) / n
+        gene_variances[gene_name] = variance
+    
+    avg_variance = sum(gene_variances.values()) / len(gene_variances)
+    
+    return {
+        "avg_variance": avg_variance,
+        "min_variance": min(gene_variances.values()),
+        "max_variance": max(gene_variances.values()),
+        "low_diversity_genes": [k for k, v in gene_variances.items() if v < 0.01]
+    }
+
+# Check diversity after evolution
+diversity = genome_diversity(next_genomes)
+print(f"Average gene variance: {diversity['avg_variance']:.4f}")
+if diversity['low_diversity_genes']:
+    print(f"Low diversity in: {diversity['low_diversity_genes']}")
+```

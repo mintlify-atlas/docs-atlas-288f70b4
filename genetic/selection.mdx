@@ -1,0 +1,337 @@
+---
+title: "Selection Mechanisms"
+description: "How the genetic algorithm selects parents for the next generation"
+---
+
+## Overview
+
+Selection determines which bots pass their genes to the next generation. The system uses two complementary mechanisms:
+
+1. **Elitism**: Guaranteed survival of the best performers
+2. **Tournament Selection**: Probabilistic selection favoring high fitness
+
+## Elitism
+
+The top `ELITE_COUNT` bots survive unchanged into the next generation.
+
+```python genetic/evolution.py
+ELITE_COUNT = 5
+
+def evolve(population: list[GeneticBot]) -> list[Genome]:
+    ranked = sorted(population, key=evaluate_fitness, reverse=True)
+    gen_num = ranked[0].genome.generation + 1
+    next_gen: list[Genome] = []
+    
+    # 1. Elitism: keep top N unchanged
+    for bot in ranked[:ELITE_COUNT]:
+        elite = bot.genome.clone()
+        elite.generation = gen_num
+        elite.parent_ids = [bot.genome.id]
+        next_gen.append(elite)
+```
+
+### Why Elitism?
+
+<AccordionGroup>
+  <Accordion title="Preserves Best Solutions">
+    Without elitism, the best genome could be lost due to crossover/mutation randomness. Elitism guarantees monotonic improvement in best fitness.
+  </Accordion>
+  
+  <Accordion title="Accelerates Convergence">
+    By keeping proven winners, the population converges faster toward profitable strategies.
+  </Accordion>
+  
+  <Accordion title="Provides Baseline">
+    Elite genomes serve as performance benchmarks for the rest of the population.
+  </Accordion>
+</AccordionGroup>
+
+**Configuration:**
+
+```python genetic/config.py
+ELITE_COUNT = 5  # Top 5% of population (5/100)
+```
+
+<Note>
+Elite genomes still receive a new ID and have their generation number incremented, but their gene values remain identical.
+</Note>
+
+## Tournament Selection
+
+For the remaining 90 slots (after elitism and before immigration), parents are chosen via tournament selection.
+
+### Algorithm
+
+<Steps>
+  <Step title="Sample Candidates">
+    Randomly select `TOURNAMENT_SIZE` bots from the population.
+    
+    ```python
+    candidates = random.sample(population, TOURNAMENT_SIZE)
+    ```
+  </Step>
+  
+  <Step title="Evaluate Fitness">
+    Compute fitness for each candidate.
+    
+    ```python
+    fitness_scores = [evaluate_fitness(bot) for bot in candidates]
+    ```
+  </Step>
+  
+  <Step title="Select Winner">
+    Return the candidate with highest fitness.
+    
+    ```python
+    return max(candidates, key=evaluate_fitness)
+    ```
+  </Step>
+</Steps>
+
+### Implementation
+
+```python genetic/evolution.py
+TOURNAMENT_SIZE = 7
+
+def select_parent(population: list[GeneticBot]) -> GeneticBot:
+    """Tournament selection: pick TOURNAMENT_SIZE random bots, return best."""
+    candidates = random.sample(population, min(TOURNAMENT_SIZE, len(population)))
+    return max(candidates, key=evaluate_fitness)
+```
+
+### Selection Pressure
+
+Tournament size controls selection pressure:
+
+| Tournament Size | Selection Pressure | Best Bot Selection Probability |
+|-----------------|--------------------|---------------------------------|
+| 1               | None (random)      | 1%                              |
+| 3               | Low                | ~9%                             |
+| 7 (default)     | Medium             | ~26%                            |
+| 15              | High               | ~58%                            |
+| 100             | Maximum            | 100% (always best)              |
+
+**Calculation:**
+
+For a bot ranked k-th out of N=100:
+
+```
+P(selected) = (N - k + 1)^t - (N - k)^t / N^t
+
+where t = tournament size
+```
+
+With `t=7`, the best bot has:
+```
+P = (100^7 - 99^7) / 100^7 ≈ 26%
+```
+
+### Why Tournament Selection?
+
+<AccordionGroup>
+  <Accordion title="Balances Exploration and Exploitation">
+    Tournament size 7 gives strong bias toward fit individuals while still allowing diversity.
+  </Accordion>
+  
+  <Accordion title="No Fitness Scaling Required">
+    Unlike roulette-wheel selection, tournament works with negative fitness values and doesn't require normalization.
+  </Accordion>
+  
+  <Accordion title="Simple and Efficient">
+    O(k) complexity per selection, no sorting required.
+  </Accordion>
+  
+  <Accordion title="Tunable Pressure">
+    Easy to adjust selection pressure by changing tournament size.
+  </Accordion>
+</AccordionGroup>
+
+## Breeding Process
+
+After elitism, the remaining slots are filled through breeding:
+
+```python genetic/evolution.py
+def evolve(population: list[GeneticBot]) -> list[Genome]:
+    # ... elitism code ...
+    
+    # 2. Breed to fill
+    breed_count = POPULATION_SIZE - ELITE_COUNT - IMMIGRATION_COUNT
+    for _ in range(breed_count):
+        parent_a = select_parent(population)
+        
+        if random.random() < CROSSOVER_RATE:
+            parent_b = select_parent(population)
+            child = crossover(parent_a.genome, parent_b.genome, gen_num)
+        else:
+            child = parent_a.genome.clone()
+            child.generation = gen_num
+            child.parent_ids = [parent_a.genome.id]
+        
+        child = mutate(child)
+        next_gen.append(child)
+```
+
+### Crossover vs Clone
+
+With `CROSSOVER_RATE = 0.7`:
+
+- **70% of offspring**: Created by combining two parents via crossover
+- **30% of offspring**: Cloned from single parent (asexual reproduction)
+
+**Why allow cloning?**
+
+- Preserves good genomes that might be disrupted by crossover
+- Allows incremental improvement via mutation alone
+- Maintains diversity when crossover would create similar offspring
+
+## Immigration
+
+The final 5 genomes are completely random ("immigrants"):
+
+```python genetic/evolution.py
+IMMIGRATION_COUNT = 5
+
+def evolve(population: list[GeneticBot]) -> list[Genome]:
+    # ... elitism and breeding ...
+    
+    # 3. Immigration: random new genomes for diversity
+    for _ in range(IMMIGRATION_COUNT):
+        next_gen.append(Genome.random(generation=gen_num))
+    
+    return next_gen
+```
+
+### Why Immigration?
+
+<AccordionGroup>
+  <Accordion title="Prevents Premature Convergence">
+    If the population gets stuck in a local optimum, immigration introduces fresh genetic material.
+  </Accordion>
+  
+  <Accordion title="Explores Distant Regions">
+    Random genomes can discover strategies the current population would never reach through crossover/mutation.
+  </Accordion>
+  
+  <Accordion title="Maintains Diversity">
+    Continuous injection of new genes prevents the population from becoming too homogeneous.
+  </Accordion>
+</AccordionGroup>
+
+**Trade-off:**
+
+- Too much immigration (greater than 10%) wastes slots on likely poor performers
+- Too little immigration (less than 2%) risks getting stuck in local optima
+- 5% is a balanced middle ground
+
+## Generation Composition
+
+Each generation of 100 genomes consists of:
+
+```
+100 Total Genomes
+├── 5 Elite (exact copies of previous generation's top 5)
+├── 90 Offspring
+│   ├── 63 from Crossover (70% of 90)
+│   └── 27 from Cloning (30% of 90)
+└── 5 Immigrants (random)
+```
+
+All 90 offspring go through mutation (15% per gene).
+
+## Selection Statistics
+
+Expected number of offspring per bot, by rank:
+
+| Fitness Rank | Elite? | Expected Offspring | Total Copies in Next Gen |
+|--------------|--------|--------------------|--------------------------|
+| 1 (Best)     | Yes    | ~3.2               | ~4.2 (including elite)   |
+| 2            | Yes    | ~2.8               | ~3.8                     |
+| 3            | Yes    | ~2.5               | ~3.5                     |
+| 4            | Yes    | ~2.2               | ~3.2                     |
+| 5            | Yes    | ~2.0               | ~3.0                     |
+| 10           | No     | ~1.5               | ~1.5                     |
+| 25           | No     | ~0.9               | ~0.9                     |
+| 50 (Median)  | No     | ~0.4               | ~0.4                     |
+| 75           | No     | ~0.1               | ~0.1                     |
+| 100 (Worst)  | No     | ~0.01              | ~0.01                    |
+
+<Note>
+The best bot appears in the next generation on average 4.2 times (1 elite copy + 3.2 as parent in breeding).
+</Note>
+
+## Selection Pressure Over Time
+
+As generations progress:
+
+<Steps>
+  <Step title="Early Generations (0-10)">
+    - High diversity, wide fitness distribution
+    - Tournament selection explores many strategies
+    - Immigration finds new niches
+  </Step>
+  
+  <Step title="Mid Generations (10-50)">
+    - Convergence toward profitable signals
+    - Elites dominate breeding pool
+    - Mutation fine-tunes parameters
+  </Step>
+  
+  <Step title="Late Generations (50+)">
+    - Population mostly similar (descendants of early winners)
+    - Immigration provides main source of diversity
+    - Evolution plateaus unless market conditions change
+  </Step>
+</Steps>
+
+## Configuration Reference
+
+```python genetic/config.py
+# Selection
+ELITE_COUNT = 5           # Top performers that survive unchanged
+TOURNAMENT_SIZE = 7       # Number of candidates per tournament
+IMMIGRATION_COUNT = 5     # Random genomes injected each generation
+
+# Breeding
+CROSSOVER_RATE = 0.7      # Probability of crossover vs cloning
+MUTATION_RATE = 0.15      # Per-gene mutation probability
+MUTATION_SIGMA = 0.10     # Mutation perturbation stddev
+
+# Population
+POPULATION_SIZE = 100     # Total genomes per generation
+```
+
+## Tuning Selection Pressure
+
+### Increase Exploitation (faster convergence)
+
+- Increase `ELITE_COUNT` to 10
+- Increase `TOURNAMENT_SIZE` to 15
+- Decrease `IMMIGRATION_COUNT` to 2
+- Increase `CROSSOVER_RATE` to 0.9
+
+### Increase Exploration (more diversity)
+
+- Decrease `ELITE_COUNT` to 2
+- Decrease `TOURNAMENT_SIZE` to 3
+- Increase `IMMIGRATION_COUNT` to 10
+- Decrease `CROSSOVER_RATE` to 0.5
+
+<Warning>
+Changing these parameters affects convergence speed and final solution quality. Test carefully.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Evolution Operators" icon="shuffle" href="/genetic/operators">
+    Crossover and mutation implementation
+  </Card>
+  
+  <Card title="Fitness Evaluation" icon="medal" href="/genetic/fitness">
+    How bots are scored
+  </Card>
+  
+  <Card title="Analysis" icon="chart-mixed" href="/genetic/analysis">
+    Analyze selection effectiveness
+  </Card>
+</CardGroup>

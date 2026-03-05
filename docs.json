@@ -1,122 +1,121 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Simple Kalshi Bot",
+  "theme": "palm",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#10b981",
+    "light": "#6ee7b7",
+    "dark": "#047857"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/DeweyMarco/simple-kalshi-bot"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/DeweyMarco/simple-kalshi-bot"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/overview",
+              "concepts/paper-trading",
+              "concepts/real-trading"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Trading Strategies",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "strategies/overview",
+              "strategies/previous",
+              "strategies/momentum",
+              "strategies/consensus"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Guides",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "guides/configuration",
+              "guides/running-bot",
+              "guides/analyzing-results"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Genetic Algorithm",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Overview",
             "pages": [
-              "api-reference/introduction"
+              "genetic/introduction",
+              "genetic/architecture"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Evolution System",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "genetic/genome",
+              "genetic/fitness",
+              "genetic/selection",
+              "genetic/operators"
+            ]
+          },
+          {
+            "group": "Running Evolution",
+            "pages": [
+              "genetic/quickstart",
+              "genetic/monitoring",
+              "genetic/analysis"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Modules",
+            "pages": [
+              "api/bot",
+              "api/kalshi-client",
+              "api/strategies"
+            ]
+          },
+          {
+            "group": "Genetic Modules",
+            "pages": [
+              "api/genetic/genome",
+              "api/genetic/evolution",
+              "api/genetic/engine",
+              "api/genetic/bot"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/environment-variables",
+              "api/genetic-config"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

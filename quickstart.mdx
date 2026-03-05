@@ -1,80 +1,182 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get your paper trading bot running in minutes"
 ---
 
-## Get started in three steps
+Get started with Simple Kalshi Bot and see your first simulated trades in under 5 minutes.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, make sure you have:
+- Python 3.7 or higher installed
+- pip (Python package installer)
+- Basic command line familiarity
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Quick Setup
+
+<Steps>
+  <Step title="Clone or Download the Repository">
+    Get the source code on your machine:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    git clone <repository-url>
+    cd simple-kalshi-bot
+    ```
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    Or download and extract the ZIP file, then navigate to the directory.
+  </Step>
 
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+  <Step title="Install Dependencies">
+    Install the required Python packages:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+    This installs:
+    - `requests` - for API calls to Kalshi and Coinbase
+    - `python-dotenv` - for environment configuration
+    - `cryptography` - for secure operations
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Create Your Configuration">
+    Copy the example environment file:
+    
+    ```bash
+    cp .env.example .env
+    ```
+    
+    The default settings work out of the box for paper trading:
+    
+    ```bash .env
+    KALSHI_USE_DEMO=true
+    KALSHI_EVENT_TICKER_PREFIX=KXBTC15M
+    POLL_SECONDS=5
+    STAKE_USD=5
+    ```
+    
+    <Note>
+      You don't need to edit `.env` for basic paper trading. The defaults use Kalshi's demo API and simulate $5 stakes per trade.
+    </Note>
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Run the Bot">
+    Start the paper trading bot:
+    
+    ```bash
+    python3 bot.py
+    ```
+    
+    You'll see output like:
+    
+    ```bash
+    Watching KXBTC15M markets with 7 strategies:
+      1. PREVIOUS:  Buy same side as previous market result
+      2. MOMENTUM:  Buy based on BTC price direction in last 60s
+      3. CONSENSUS: Buy only when PREVIOUS and MOMENTUM agree
+      4. MOMENTUM_15: Buy based on BTC direction over 900s
+      5. PREVIOUS_2: Wait for PREVIOUS side at <= $0.45
+      6. CONSENSUS_2: Wait for CONSENSUS side at <= $0.45
+      7. ARBITRAGE: Buy immediately, then hedge opposite side if profitable
+    Stake: $5.0 per trade | Polling: 5s | CSV: data/mock_trades.csv
+    
+    [14:32:15] KXBTC15M-24MAR05-T1445 (847s) | yes=$0.52 no=$0.51 | BTC=94,234
+    ```
+  </Step>
 
-### Step 3: Go live
+  <Step title="Watch It Trade">
+    The bot will monitor markets and execute paper trades when conditions are met:
+    
+    ```bash
+    -> [PREVIOUS] BUY yes $5.0 @ $0.5200
+    -> [MOMENTUM] BTC +0.142% -> BUY yes (UP) $5.0 @ $0.5200
+    -> [CONSENSUS] Both agree yes (UP) -> BUY 12 ($6.24) @ $0.52
+    ```
+    
+    When markets settle, you'll see results:
+    
+    ```bash
+    ** [PREVIOUS] SETTLED KXBTC15M-24MAR05-T1430: WIN $+4.20
+    ** [MOMENTUM] SETTLED KXBTC15M-24MAR05-T1430: WIN $+4.20
+    ** [CONSENSUS] SETTLED KXBTC15M-24MAR05-T1430: WIN $+5.76
+    ```
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Stop and View Results">
+    Press `Ctrl+C` to stop the bot gracefully. It will display final statistics:
+    
+    ```bash
+    ^C
+    Stopped.
+    === FINAL STATS ===
+    PREVIOUS:  $+12.40 | 8W/5L | 2 pending
+    MOMENTUM:  $+8.75 | 7W/6L | 2 pending
+    CONSENSUS: $+15.20 | 9W/4L | 1 pending
+    MOMENTUM_15: $-2.50 | 5W/7L | 1 pending
+    PREVIOUS_2:  $+3.10 | 4W/2L | 0 pending
+    CONSENSUS_2: $+6.80 | 5W/2L | 0 pending
+    ARBITRAGE:   $+1.25 | 3W/1L | 1 pending
+    TOTAL:     $+45.00 | 41W/27L
+    ```
+  </Step>
+</Steps>
 
-## Next steps
+## View Trade History
 
-Now that you have your docs running, explore these key features:
+All trades are logged to a CSV file at `data/mock_trades.csv`. Open it in Excel, Google Sheets, or any spreadsheet program to analyze:
 
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+```csv
+time,strategy,previous_ticker,previous_result,buy_ticker,buy_side,stake_usd,price_usd,contracts,fee_usd,gross_profit_usd,outcome,payout_usd,profit_usd
+2024-03-05T14:32:15+00:00,PREVIOUS,KXBTC15M-24MAR05-T1430,yes,KXBTC15M-24MAR05-T1445,yes,5.0,0.52,9.6154,0.0,4.6154,WIN,9.6154,4.6154
+```
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+The CSV updates in real-time as trades are placed and settled. You can open it while the bot is running to see live results.
 </Note>
+
+## Understanding the Output
+
+### Status Line Format
+
+```bash
+[14:32:15] KXBTC15M-24MAR05-T1445 (847s) | yes=$0.52 no=$0.51 | BTC=94,234 | P:$-2.50 M:$+1.75 C:$+3.20
+```
+
+- `[14:32:15]` - Current time
+- `KXBTC15M-24MAR05-T1445` - Active market ticker
+- `(847s)` - Seconds until market closes
+- `yes=$0.52 no=$0.51` - Current ask prices for both sides
+- `BTC=94,234` - Current Bitcoin spot price
+- `P:$-2.50` - PREVIOUS strategy profit/loss
+- `M:$+1.75` - MOMENTUM strategy profit/loss
+- `C:$+3.20` - CONSENSUS strategy profit/loss
+- Additional columns show other strategy performance
+
+### Trade Notifications
+
+```bash
+-> [STRATEGY_NAME] Trade details
+```
+
+Indicates a new paper trade was placed.
+
+```bash
+** [STRATEGY_NAME] SETTLED ticker: WIN/LOSS $±amount
+```
+
+Indicates a pending trade was settled with the outcome.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="book" href="/installation">
+    Learn about detailed configuration options and customization
+  </Card>
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Customize strategies, risk parameters, and market selection
+  </Card>
+</CardGroup>
+
+<Warning>
+Remember: This is paper trading only. No real money is at risk. All trades are simulated based on real market prices.
+</Warning>

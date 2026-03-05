@@ -1,0 +1,362 @@
+---
+title: "Quick Start"
+description: "Get the genetic algorithm trading system running in minutes"
+---
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+<Steps>
+  <Step title="Python 3.11+">
+    ```bash
+    python --version
+    # Should output: Python 3.11.x or higher
+    ```
+  </Step>
+  
+  <Step title="Kalshi API Credentials">
+    Sign up at [kalshi.com](https://kalshi.com) and get your API key.
+    
+    Create a `.env` file:
+    ```bash .env
+    KALSHI_EMAIL=your-email@example.com
+    KALSHI_PASSWORD=your-password
+    # or
+    KALSHI_API_KEY=your-api-key
+    ```
+  </Step>
+  
+  <Step title="Clone Repository">
+    ```bash
+    git clone https://github.com/yourusername/simple-kalshi-bot.git
+    cd simple-kalshi-bot
+    ```
+  </Step>
+</Steps>
+
+## Installation
+
+<CodeGroup>
+```bash Using pip
+pip install -r requirements.txt
+```
+
+```bash Using uv (faster)
+uv pip install -r requirements.txt
+```
+</CodeGroup>
+
+## Running Evolution
+
+### Start from Scratch
+
+Launch the genetic algorithm with default settings:
+
+```bash
+python -m genetic
+```
+
+**What happens:**
+
+<Steps>
+  <Step title="Initialization">
+    - Connects to Kalshi API
+    - Creates 100 random genomes (Generation 0)
+    - Starts market data feed (background thread)
+  </Step>
+  
+  <Step title="Trading Period (24 hours)">
+    - Each bot evaluates markets every 30 seconds
+    - Bots execute paper trades based on their genes
+    - Positions settle as markets close
+  </Step>
+  
+  <Step title="Settlement Wait (up to 4 hours)">
+    - System waits for all positions to settle
+    - Queries Kalshi API for market outcomes
+  </Step>
+  
+  <Step title="Evolution">
+    - Bots ranked by ROI%
+    - Top 5 survive (elitism)
+    - Next 90 created via selection/crossover/mutation
+    - 5 random immigrants added
+    - Generation 1 begins
+  </Step>
+</Steps>
+
+### Expected Output
+
+```bash
+============================================================
+  GENETIC ALGORITHM TRADING BOT - KALSHI
+============================================================
+Population: 100 | Bankroll: $100.0
+Generation: 24h | Tick: 30s
+Connected to Kalshi API: https://api.elections.kalshi.com/trade-api/v2
+Market data feed started, waiting for initial data...
+Feed ready: 347 markets (closing within window), 8 categories: ['climate', 'economics', 'finance', 'politics', 'science', 'sports', 'technology', 'world']
+
+============================================================
+GENERATION 0
+============================================================
+Created 100 bots, starting trading period...
+[00:30:00] [Gen 0 | 0.5h] Active: 23/100 | Open: 12 | Trades: 23 | Settled: 0 | Est ROI: +2.1%/-0.5% | Realized: +0.0%/+0.0%
+[01:00:00] [Gen 0 | 1.0h] Active: 45/100 | Open: 38 | Trades: 87 | Settled: 12 | Est ROI: +5.3%/+0.8% | Realized: +3.2%/+0.4%
+...
+```
+
+## Configuration
+
+Customize evolution parameters by editing `genetic/config.py`:
+
+### Population Settings
+
+```python genetic/config.py
+POPULATION_SIZE = 100  # Total bots per generation
+INITIAL_BANKROLL = 100.0  # USD per bot
+```
+
+### Timing Settings
+
+```python
+GENERATION_DURATION_SECONDS = 24 * 3600  # 24 hours
+TICK_INTERVAL_SECONDS = 30  # Bot decision frequency
+```
+
+<Note>
+For faster testing, reduce `GENERATION_DURATION_SECONDS` to `3600` (1 hour). This will reduce the number of settled trades and may affect fitness quality.
+</Note>
+
+### Evolution Settings
+
+```python
+ELITE_COUNT = 5           # Top performers that survive
+TOURNAMENT_SIZE = 7       # Selection pressure
+CROSSOVER_RATE = 0.7      # Crossover probability
+MUTATION_RATE = 0.15      # Per-gene mutation rate
+MUTATION_SIGMA = 0.10     # Mutation strength
+IMMIGRATION_COUNT = 5     # Random genomes per generation
+```
+
+## Resuming Evolution
+
+Evolution automatically saves state. If interrupted:
+
+```bash
+python -m genetic
+```
+
+**Output:**
+```
+Resumed from generation 5, starting gen 6
+```
+
+The system loads the last completed generation from `data/evolution/latest.json`.
+
+## Monitoring Progress
+
+Evolution logs are written to:
+
+<CodeGroup>
+```bash Console (INFO level)
+tail -f data/evolution/evolution.log | grep INFO
+```
+
+```bash Full Debug Log
+tail -f data/evolution/evolution.log
+```
+</CodeGroup>
+
+### Real-time Statistics
+
+Every 30 minutes, you'll see progress logs:
+
+```
+[Gen 3 | 12.0h] Active: 87/100 | Open: 45 | Trades: 892 | Settled: 847 | 
+Est ROI: +23.5%/+5.2% | Realized: +18.7%/+4.1%
+```
+
+**Metrics:**
+- **Active**: Bots that have made at least 1 trade
+- **Open**: Total open positions across all bots
+- **Trades**: Total trades executed
+- **Settled**: Positions that have settled
+- **Est ROI**: Best/Median estimated ROI (including open positions)
+- **Realized ROI**: Best/Median realized ROI (settled only)
+
+### Generation Summary
+
+After each generation completes:
+
+```
+======================================================================
+GENERATION 3 RESULTS
+======================================================================
+Rank  Bot ID         ROI%   Trades  Settled  WinRate  Signal
+----------------------------------------------------------------------
+1     bot_a3f8c1    +34.2%     18       18    72.2%   mean_reversion
+2     bot_9d2e45    +28.9%     24       23    65.2%   value
+3     bot_7b1a92    +22.1%     15       15    60.0%   momentum
+4     bot_4c6e8d    +18.5%     22       21    57.1%   contrarian
+5     bot_2b9f1a    +15.3%     19       19    52.6%   mean_reversion
+...
+
+Signal distribution: {'mean_reversion': 42, 'value': 28, 'momentum': 15, 'contrarian': 10, 'price_level': 5}
+Top-10 category prefs: {'politics': 8, 'sports': 6, 'economics': 5, 'finance': 4, 'world': 3}
+
+Generation 3 stats:
+  Best ROI:    34.2%
+  Median ROI:  4.8%
+  Mean trades: 16.3
+  Active bots: 87/100
+```
+
+## Viewing Results
+
+All data is saved to `data/evolution/`:
+
+### Generation Files
+
+```bash
+ls data/evolution/
+# gen_0000.json  gen_0001.json  gen_0002.json  ...
+# checkpoint_gen0000.json  checkpoint_gen0001.json  ...
+# hall_of_fame.json
+# latest.json
+# evolution.log
+```
+
+### Hall of Fame
+
+View top performers across all generations:
+
+```python
+import json
+
+with open("data/evolution/hall_of_fame.json") as f:
+    hof = json.load(f)
+
+best = hof["best_ever"]
+print(f"Best genome: {best['fitness_roi_pct']:.1f}% ROI")
+print(f"Signal: {best['signal_type']}")
+print(f"Generation: {best['generation']}")
+print(f"Win rate: {best['win_rate']*100:.1f}%")
+print(f"Trades: {best['settled_trades']}")
+```
+
+### Load Specific Generation
+
+```python
+import json
+from genetic.genome import Genome
+
+with open("data/evolution/gen_0005.json") as f:
+    data = json.load(f)
+
+# Get best genome
+fitness = data["fitness_scores"]
+best_idx = fitness.index(max(fitness))
+best_genome = Genome.from_dict(data["genomes"][best_idx])
+
+print(best_genome)
+```
+
+## Stopping Evolution
+
+Press `Ctrl+C` to gracefully stop:
+
+```
+Interrupted by user. Shutting down...
+Saved generation 3 state to data/evolution/gen_0003.json
+Done. Resume anytime with: python -m genetic
+```
+
+The current generation will complete its evaluation before saving.
+
+## Testing Mode (Quick)
+
+For rapid testing, use a shortened generation:
+
+```python genetic/config.py
+GENERATION_DURATION_SECONDS = 1800  # 30 minutes
+TICK_INTERVAL_SECONDS = 10  # Every 10 seconds
+SETTLEMENT_WAIT_HOURS = 1  # Faster settlement timeout
+```
+
+<Warning>
+Short generations reduce trade count and settlement rate, which may produce lower-quality fitness signals.
+</Warning>
+
+## Troubleshooting
+
+### No Markets Found
+
+```
+ERROR: No markets found. Check API credentials and connectivity.
+```
+
+**Fix:**
+1. Verify `.env` file has correct credentials
+2. Check internet connection
+3. Ensure Kalshi API is accessible: `curl https://api.kalshi.com/trade-api/v2/exchange/status`
+
+### API Rate Limits
+
+```
+ERROR: Rate limit exceeded (429)
+```
+
+**Fix:**
+- Increase `TICK_INTERVAL_SECONDS` to reduce API calls
+- The feed uses bulk queries and caching to minimize requests
+- Each tick makes ~2-3 API calls for 100 bots (shared data)
+
+### Out of Memory
+
+```
+MemoryError: Unable to allocate...
+```
+
+**Fix:**
+- Reduce `POPULATION_SIZE` to 50
+- Reduce `MARKET_HISTORY_MAX_TICKS` to 60
+- Close other applications
+
+### Bots Inactive (Low Trade Count)
+
+```
+Generation 0 stats:
+  Active bots: 12/100
+```
+
+**Possible causes:**
+- Market filters too strict (most genomes filter out all markets)
+- Not enough markets available (check feed stats)
+- Generation duration too short for settlements
+
+**Fix:**
+- Let evolution run - it will naturally select active bots
+- Check `feed.get_stats()` to see market count
+- Increase `GENERATION_DURATION_SECONDS`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Monitoring" icon="chart-line" href="/genetic/monitoring">
+    Track evolution progress in real-time
+  </Card>
+  
+  <Card title="Analysis" icon="chart-mixed" href="/genetic/analysis">
+    Analyze results and gene distributions
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/genetic/architecture">
+    Understand the system design
+  </Card>
+  
+  <Card title="Genome Structure" icon="dna" href="/genetic/genome">
+    Deep dive into the 22 genes
+  </Card>
+</CardGroup>

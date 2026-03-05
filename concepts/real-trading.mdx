@@ -1,0 +1,514 @@
+---
+title: "Real Trading Mode"
+description: "Deploy the bot with Kalshi API for live trading"
+---
+
+## Overview
+
+Real trading mode uses the Kalshi API to place actual orders on prediction markets. The bot authenticates using RSA key signatures and places limit orders based on the CONSENSUS strategy.
+
+<Warning>
+Real trading involves actual money. Always start with small amounts and use the demo API for testing before deploying to production.
+</Warning>
+
+## Architecture
+
+The real trading bot (`consensus.py`) is simplified compared to paper trading:
+
+- **Single strategy**: Only implements CONSENSUS (PREVIOUS + MOMENTUM agreement)
+- **Authenticated API**: Uses RSA-PSS signatures for authentication
+- **Order placement**: Places real limit orders via Kalshi API
+- **Dry run mode**: Can simulate orders even with API credentials
+
+## Kalshi API Authentication
+
+The bot uses RSA key signing for secure API authentication:
+
+### KalshiClient Implementation
+
+```python
+# From kalshi_client.py:41-66
+class KalshiClient:
+    def __init__(self):
+        self.api_base = get_api_base()
+        self.api_key_id = os.getenv("KALSHI_API_KEY_ID", "")
+        if not self.api_key_id:
+            raise ValueError("KALSHI_API_KEY_ID environment variable required")
+        
+        self.private_key = load_private_key()
+        self.session = requests.Session()
+    
+    def _sign_request(self, method: str, path: str, timestamp: str) -> str:
+        """Generate RSA-PSS signature for request."""
+        path_without_query = path.split("?")[0]
+        message = f"{timestamp}{method}/trade-api/v2{path_without_query}"
+        signature = self.private_key.sign(
+            message.encode("utf-8"),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH,
+            ),
+            hashes.SHA256(),
+        )
+        return base64.b64encode(signature).decode("utf-8")
+```
+
+### Request Signing
+
+Every API request includes three headers:
+
+```python
+# From kalshi_client.py:73-79
+headers.update({
+    "KALSHI-ACCESS-KEY": self.api_key_id,
+    "KALSHI-ACCESS-SIGNATURE": signature,
+    "KALSHI-ACCESS-TIMESTAMP": timestamp,
+    "Content-Type": "application/json",
+})
+```
+
+<Info>
+The signature is generated using RSA-PSS with SHA256 hashing, following Kalshi's authentication specification.
+</Info>
+
+## Required Configuration
+
+Create a `.env` file with your Kalshi API credentials:
+
+```bash
+# Kalshi API Credentials
+KALSHI_API_KEY_ID=your_api_key_id_here
+KALSHI_PRIVATE_KEY_PATH=~/.kalshi/private_key.pem
+
+# API Environment
+KALSHI_USE_DEMO=true  # Use demo-api.kalshi.co
+# KALSHI_USE_DEMO=false  # Use api.elections.kalshi.com (production)
+
+# Safety Controls
+DRY_RUN=true  # Simulate orders without executing
+
+# Trading Parameters
+KALSHI_EVENT_TICKER_PREFIX=KXBTC15M
+STAKE_USD=5.0
+POLL_SECONDS=5
+MOMENTUM_WINDOW_SECONDS=60
+
+# Output
+CONSENSUS_TRADES_CSV=data/consensus_trades.csv
+```
+
+### API Environment Selection
+
+```python
+# From kalshi_client.py:21-26
+def get_api_base():
+    use_demo = os.getenv("KALSHI_USE_DEMO", "true").lower() == "true"
+    if use_demo:
+        return "https://demo-api.kalshi.co/trade-api/v2"
+    return "https://api.elections.kalshi.com/trade-api/v2"
+```
+
+<Steps>
+  <Step title="Generate API Keys">
+    Log into Kalshi and generate an API key pair in your account settings
+  </Step>
+  <Step title="Save Private Key">
+    Save the RSA private key to a secure location (e.g., `~/.kalshi/private_key.pem`)
+  </Step>
+  <Step title="Set Permissions">
+    Ensure the private key file has restricted permissions: `chmod 600 ~/.kalshi/private_key.pem`
+  </Step>
+  <Step title="Configure Environment">
+    Add your API key ID and private key path to `.env`
+  </Step>
+</Steps>
+
+## Running Real Trading
+
+### Dry Run Mode (Recommended First)
+
+```bash
+# Simulate orders without executing them
+DRY_RUN=true python consensus.py
+```
+
+Dry run mode:
+- Connects to the real API
+- Generates signals and calculates order parameters
+- Simulates order placement without submitting
+- Logs trades to CSV with simulated order IDs
+
+```python
+# From kalshi_client.py:110-121
+def place_order(self, ticker, side, contracts, price_cents, dry_run=False):
+    if dry_run:
+        return {
+            "order": {
+                "order_id": f"DRY-RUN-{uuid.uuid4()}",
+                "status": "simulated",
+                "ticker": ticker,
+                "side": side,
+                "count": contracts,
+            }
+        }
+```
+
+### Live Trading
+
+```bash
+# Execute real orders
+DRY_RUN=false KALSHI_USE_DEMO=false python consensus.py
+```
+
+<Warning>
+**Before going live:**
+- Test thoroughly in dry run mode
+- Verify your API credentials work
+- Start with small stake amounts
+- Monitor the bot closely for the first few trades
+</Warning>
+
+## Order Placement
+
+When CONSENSUS signals agree, the bot places a limit order:
+
+```python
+# From consensus.py:464-494
+if prev_signal == mom_signal:
+    side = prev_signal
+    price = yes_ask if side == "yes" else no_ask
+    price_cents = int(price * 100)
+    
+    if price <= 0:
+        print(f"  Invalid price ${price}, skipping")
+        traded_tickers.add(ticker)
+        time.sleep(POLL_SECONDS)
+        continue
+    
+    contracts = int(STAKE_USD / price)
+    if contracts < 1:
+        contracts = 1
+    
+    print()
+    print(f"  >>> CONSENSUS SIGNAL: {side.upper()} <<<")
+    print(
+        f"  Placing order: BUY {contracts} {side} @ ${price:.2f} "
+        f"(${contracts * price:.2f} total)"
+    )
+    
+    try:
+        order_resp = client.place_order(
+            ticker=ticker,
+            side=side,
+            contracts=contracts,
+            price_cents=price_cents,
+            dry_run=dry_run,
+        )
+```
+
+### Order Structure
+
+Limit orders are sent with the following format:
+
+```python
+# From kalshi_client.py:123-136
+order = {
+    "ticker": ticker,
+    "client_order_id": str(uuid.uuid4()),
+    "type": "limit",
+    "action": "buy",
+    "side": side,
+    "count": contracts,
+}
+
+if side == "yes":
+    order["yes_price"] = price_cents
+else:
+    order["no_price"] = price_cents
+```
+
+<Info>
+Prices are specified in cents (1-99) rather than decimals (0.01-0.99).
+</Info>
+
+## Trade Tracking
+
+All trades are logged to CSV with order details:
+
+```python
+# From consensus.py:218-235
+fieldnames = [
+    "time",          # ISO timestamp
+    "buy_ticker",    # Market ticker
+    "buy_side",      # "yes" or "no"
+    "stake_usd",     # Total amount wagered
+    "price_usd",     # Price per contract
+    "contracts",     # Number of contracts
+    "order_id",      # Kalshi order ID
+    "prev_signal",   # PREVIOUS strategy signal
+    "mom_signal",    # MOMENTUM strategy signal
+    "outcome",       # "WIN" or "LOSS" when settled
+    "payout_usd",    # Payout received
+    "profit_usd",    # Net profit/loss
+]
+```
+
+### Settlement Processing
+
+The bot polls pending trades for settlement:
+
+```python
+# From consensus.py:372-402
+for trade in trades:
+    if trade.get("outcome"):
+        continue
+    
+    buy_ticker = trade.get("buy_ticker")
+    if not buy_ticker:
+        continue
+    
+    try:
+        m = client.get_market(buy_ticker)
+        result = get_settled_side(m)
+        if result:
+            buy_side = trade.get("buy_side")
+            contracts = float(trade.get("contracts", 0))
+            stake = float(trade.get("stake_usd", 0))
+            
+            won = result == buy_side
+            payout = contracts if won else 0
+            profit = payout - stake
+            
+            trade["outcome"] = "WIN" if won else "LOSS"
+            trade["payout_usd"] = round(payout, 4)
+            trade["profit_usd"] = round(profit, 4)
+            updated = True
+            
+            print(f"  ** SETTLED {buy_ticker}: {trade['outcome']} ${profit:+.2f}")
+```
+
+## API Methods
+
+The `KalshiClient` provides these key methods:
+
+### Portfolio Management
+
+```python
+# Get account balance
+balance = client.get_balance()
+balance_usd = balance.get("balance", 0) / 100
+
+# Get current positions
+positions = client.get_positions()
+```
+
+### Market Data
+
+```python
+# Get markets for a series
+markets = client.get_markets(
+    series_ticker="KXBTC15M",
+    status="open",
+    limit=50
+)
+
+# Get specific market
+market = client.get_market("KXBTC15M-26MAR05-T2045")
+```
+
+### Order Placement
+
+```python
+# Place a limit order
+order_resp = client.place_order(
+    ticker="KXBTC15M-26MAR05-T2045",
+    side="yes",
+    contracts=10,
+    price_cents=52,  # $0.52 per contract
+    dry_run=False
+)
+```
+
+## Console Output
+
+The bot displays comprehensive status information:
+
+```
+============================================================
+CONSENSUS STRATEGY BOT - REAL TRADING
+============================================================
+Series: KXBTC15M
+Stake: $5.0 per trade
+Momentum window: 60s
+Poll interval: 5s
+Trades CSV: data/consensus_trades.csv
+DRY RUN: True
+
+API: https://demo-api.kalshi.co/trade-api/v2
+API Key: a1b2c3d4...
+Account balance: $500.00
+
+Loaded 15 trades from CSV
+Stats: $+42.50 profit | 12W/3L | 0 pending
+
+Starting bot loop...
+------------------------------------------------------------
+[14:30:15] [DRY] KXBTC15M-26MAR05-T2045 (420s) | yes=$0.52 no=$0.48 | BTC=94,250 | P&L: $+42.50
+  PREVIOUS signal: yes (from KXBTC15M-26MAR05-T2030)
+  MOMENTUM signal: yes (BTC +0.125%)
+
+  >>> CONSENSUS SIGNAL: YES <<<
+  Placing order: BUY 9 yes @ $0.52 ($4.68 total)
+  Order placed! ID: DRY-RUN-a1b2c3d4-...
+```
+
+## Safety Features
+
+<CardGroup cols={2}>
+  <Card title="Dry Run Mode" icon="flask">
+    Test with real API without executing orders
+  </Card>
+  <Card title="Demo API" icon="cloud">
+    Use Kalshi's demo environment with test funds
+  </Card>
+  <Card title="Single Strategy" icon="filter">
+    Only trades when both signals agree (CONSENSUS)
+  </Card>
+  <Card title="Trade Deduplication" icon="shield">
+    Never trades the same market twice
+  </Card>
+</CardGroup>
+
+## Error Handling
+
+The bot handles API errors gracefully:
+
+```python
+# From consensus.py:487-519
+try:
+    order_resp = client.place_order(
+        ticker=ticker,
+        side=side,
+        contracts=contracts,
+        price_cents=price_cents,
+        dry_run=dry_run,
+    )
+    order = order_resp.get("order", {})
+    order_id = order.get("order_id", "?")
+    print(f"  Order placed! ID: {order_id}")
+    
+    trade = {
+        "time": now.isoformat(),
+        "buy_ticker": ticker,
+        "buy_side": side,
+        "stake_usd": round(contracts * price, 4),
+        "price_usd": round(price, 4),
+        "contracts": contracts,
+        "order_id": order_id,
+        "prev_signal": prev_signal,
+        "mom_signal": mom_signal,
+        "outcome": "",
+        "payout_usd": "",
+        "profit_usd": "",
+    }
+    trades.append(trade)
+    save_trades(trades)
+    traded_tickers.add(ticker)
+
+except Exception as e:
+    print(f"  ORDER FAILED: {e}")
+    traded_tickers.add(ticker)  # Don't retry same market
+```
+
+## Monitoring and Debugging
+
+### Check Account Balance
+
+```bash
+python -c "from kalshi_client import KalshiClient; c = KalshiClient(); print(c.get_balance())"
+```
+
+### View Current Positions
+
+```bash
+python -c "from kalshi_client import KalshiClient; c = KalshiClient(); print(c.get_positions())"
+```
+
+### Test Authentication
+
+```bash
+python -c "from kalshi_client import KalshiClient; c = KalshiClient(); print('Auth successful!')"
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Start with Demo">
+    Always test with `KALSHI_USE_DEMO=true` before production
+  </Step>
+  <Step title="Enable Dry Run">
+    Use `DRY_RUN=true` to verify order logic
+  </Step>
+  <Step title="Small Stakes">
+    Start with minimal `STAKE_USD` amounts
+  </Step>
+  <Step title="Monitor Closely">
+    Watch the bot's output for the first several trades
+  </Step>
+  <Step title="Review Logs">
+    Regularly check `data/consensus_trades.csv` for accuracy
+  </Step>
+</Steps>
+
+<Warning>
+**Important Reminders:**
+- Never commit your private key or API credentials to version control
+- Use environment variables or `.env` files (add `.env` to `.gitignore`)
+- Set appropriate file permissions on your private key (`chmod 600`)
+- Monitor your Kalshi account balance regularly
+- Be aware of Kalshi's trading fees and limits
+</Warning>
+
+## Troubleshooting
+
+### Authentication Errors
+
+```
+ValueError: KALSHI_API_KEY_ID environment variable required
+```
+
+**Solution**: Ensure your `.env` file contains `KALSHI_API_KEY_ID`.
+
+### Private Key Errors
+
+```
+ValueError: KALSHI_PRIVATE_KEY_PATH environment variable required
+```
+
+**Solution**: Set `KALSHI_PRIVATE_KEY_PATH` to the absolute path of your private key file.
+
+### 401 Unauthorized
+
+```
+HTTPError: 401 Client Error: Unauthorized
+```
+
+**Solution**: Verify your API key is valid and the private key matches the public key registered with Kalshi.
+
+### Order Placement Fails
+
+```
+ORDER FAILED: 400 Client Error: Bad Request
+```
+
+**Solution**: Check that:
+- Price is within valid range (1-99 cents)
+- Contracts count is at least 1
+- Market is still open for trading
+- You have sufficient balance
+
+## Next Steps
+
+<Card title="Paper Trading" icon="flask" href="/concepts/paper-trading">
+  Return to paper trading mode to test new strategies risk-free.
+</Card>

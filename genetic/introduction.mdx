@@ -1,0 +1,150 @@
+---
+title: "Introduction"
+description: "Overview of the genetic algorithm trading system for Kalshi markets"
+---
+
+The Simple Kalshi Bot uses a **genetic algorithm** to evolve profitable trading strategies over time. Instead of manually tuning parameters, the system automatically discovers optimal trading behaviors through simulated evolution.
+
+## How It Works
+
+The genetic algorithm follows nature's evolutionary principles:
+
+<Steps>
+  <Step title="Initialize Population">
+    Create a population of 100 random trading bots, each with unique genetic parameters.
+  </Step>
+  
+  <Step title="Evaluate Fitness">
+    Let all bots trade live on Kalshi markets for 24 hours using paper trading.
+  </Step>
+  
+  <Step title="Selection">
+    Rank bots by ROI (Return on Investment). The best performers survive.
+  </Step>
+  
+  <Step title="Reproduction">
+    Create the next generation by combining genes from successful parents (crossover) and introducing random mutations.
+  </Step>
+  
+  <Step title="Repeat">
+    Run the new generation and continue evolving indefinitely.
+  </Step>
+</Steps>
+
+## Key Features
+
+### Automated Strategy Discovery
+
+No manual parameter tuning required. The algorithm explores the strategy space automatically, discovering profitable combinations of:
+
+- Market selection criteria (volume, time to expiry, categories)
+- Entry signals (price levels, momentum, mean reversion, value, contrarian)
+- Position sizing (bankroll fraction, max concurrent positions)
+- Risk management (daily loss limits, price bounds)
+
+### Paper Trading Engine
+
+All evolution happens using **simulated trades** against real Kalshi market data:
+
+- No real money at risk during evolution
+- Fills are simulated using actual bid/ask prices
+- Settlements use real market outcomes from the Kalshi API
+- Multiple generations can run in parallel for faster evolution
+
+### Continuous Evolution
+
+The system runs indefinitely, continuously improving:
+
+- Each generation trades for 24 hours
+- Top performers pass their genes to the next generation
+- Mutations introduce new variations to explore
+- Immigration adds random diversity to prevent stagnation
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Evolution Loop                        │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  Generation N (24 hours)                         │   │
+│  │                                                  │   │
+│  │  ┌────────┐  ┌────────┐  ┌────────┐            │   │
+│  │  │ Bot 1  │  │ Bot 2  │  │ Bot 100│  ...       │   │
+│  │  │Genome A│  │Genome B│  │Genome Z│            │   │
+│  │  └────┬───┘  └────┬───┘  └────┬───┘            │   │
+│  │       │           │           │                 │   │
+│  │       └───────────┴───────────┘                 │   │
+│  │                   │                             │   │
+│  │        ┌──────────▼──────────┐                  │   │
+│  │        │  Market Data Feed   │                  │   │
+│  │        │  (Shared Real-Time  │                  │   │
+│  │        │   Kalshi Markets)   │                  │   │
+│  │        └──────────┬──────────┘                  │   │
+│  │                   │                             │   │
+│  │        ┌──────────▼──────────┐                  │   │
+│  │        │ Paper Trading Engine│                  │   │
+│  │        │  (Simulated Fills)  │                  │   │
+│  │        └──────────┬──────────┘                  │   │
+│  │                   │                             │   │
+│  │        ┌──────────▼──────────┐                  │   │
+│  │        │   Fitness = ROI%    │                  │   │
+│  │        └──────────┬──────────┘                  │   │
+│  └───────────────────┼──────────────────────────────┘   │
+│                      │                                  │
+│         ┌────────────▼────────────┐                     │
+│         │  Evolution Operators    │                     │
+│         │  • Elite Selection      │                     │
+│         │  • Tournament Selection │                     │
+│         │  • Crossover            │                     │
+│         │  • Mutation             │                     │
+│         │  • Immigration          │                     │
+│         └────────────┬────────────┘                     │
+│                      │                                  │
+│                      ▼                                  │
+│              Generation N+1                             │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Performance Metrics
+
+Evolution progress is tracked using:
+
+- **Fitness (ROI%)**: Primary metric - realized profit/loss percentage
+- **Win Rate**: Percentage of settled trades that were profitable
+- **Trade Activity**: Number of trades executed per generation
+- **Signal Distribution**: Which trading strategies are most successful
+
+<Note>
+Bots must execute at least **5 settled trades** to receive positive fitness scores. This prevents inactive bots from surviving.
+</Note>
+
+## Data Persistence
+
+The system automatically saves:
+
+- **Generation State**: All genomes, fitness scores, and statistics
+- **Hall of Fame**: Top 20 performers across all generations
+- **Checkpoints**: Mid-generation snapshots for crash recovery
+- **Evolution Logs**: Detailed logs of every generation
+
+All data is stored in `data/evolution/` and can be analyzed offline.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/genetic/architecture">
+    Deep dive into system components and data flow
+  </Card>
+  
+  <Card title="Genome Structure" icon="dna" href="/genetic/genome">
+    Understanding the 22 genes that define trading strategies
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/genetic/quickstart">
+    Run your first evolution in minutes
+  </Card>
+  
+  <Card title="Monitoring" icon="chart-line" href="/genetic/monitoring">
+    Track evolution progress in real-time
+  </Card>
+</CardGroup>

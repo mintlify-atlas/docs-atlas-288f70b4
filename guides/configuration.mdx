@@ -1,0 +1,253 @@
+---
+title: "Configuration"
+description: "Environment variables and configuration options for Simple Kalshi Bot"
+---
+
+## Overview
+
+The Simple Kalshi Bot is configured using environment variables stored in a `.env` file. This guide covers all available configuration options for both paper trading (bot.py) and real trading (consensus.py).
+
+## Environment File Setup
+
+Create a `.env` file in your project root by copying the example:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` with your configuration values.
+
+## Core Configuration
+
+### Kalshi API Credentials
+
+<ParamField path="KALSHI_API_KEY_ID" type="string" required>
+  Your Kalshi API key ID. Create this in your Kalshi account profile under API Keys.
+  
+  **Required for:** Real trading with `consensus.py`
+  
+  **Example:** `KALSHI_API_KEY_ID=your-api-key-id`
+</ParamField>
+
+<ParamField path="KALSHI_PRIVATE_KEY_PATH" type="string" required>
+  Path to your RSA private key file for API authentication.
+  
+  **Required for:** Real trading with `consensus.py`
+  
+  **Default:** `~/.key/kalshi/key`
+  
+  **Example:** `KALSHI_PRIVATE_KEY_PATH=~/.key/kalshi/key`
+</ParamField>
+
+<ParamField path="KALSHI_USE_DEMO" type="boolean" default="true">
+  Whether to use the Kalshi demo API or production API.
+  
+  - `true` - Use demo API (https://demo-api.kalshi.co)
+  - `false` - Use production API (https://api.elections.kalshi.com)
+  
+  **Example:** `KALSHI_USE_DEMO=true`
+</ParamField>
+
+<Note>
+  Always start with `KALSHI_USE_DEMO=true` to test your configuration without risking real funds.
+</Note>
+
+### Trading Safety
+
+<ParamField path="DRY_RUN" type="boolean" default="true">
+  Simulate trades without executing real orders.
+  
+  - `true` - Simulate orders (recommended for testing)
+  - `false` - Execute real orders
+  
+  **Example:** `DRY_RUN=true`
+</ParamField>
+
+<Warning>
+  Keep `DRY_RUN=true` until you have fully tested your configuration. Only set to `false` when ready for live trading.
+</Warning>
+
+## Trading Parameters
+
+### Position Sizing
+
+<ParamField path="STAKE_USD" type="number" default="5">
+  Amount in USD to stake per trade for paper trading strategies.
+  
+  **Used by:** `bot.py` for PREVIOUS, MOMENTUM, and other paper trading strategies
+  
+  **Example:** `STAKE_USD=5`
+</ParamField>
+
+<ParamField path="INITIAL_BANKROLL_USD" type="number" default="500">
+  Initial bankroll for CONSENSUS strategy risk management.
+  
+  **Used by:** `bot.py` for calculating position sizes based on risk percentage
+  
+  **Example:** `INITIAL_BANKROLL_USD=500`
+</ParamField>
+
+### Market Selection
+
+<ParamField path="KALSHI_EVENT_TICKER_PREFIX" type="string" default="KXBTC15M">
+  Market series to watch and trade.
+  
+  **Example:** `KALSHI_EVENT_TICKER_PREFIX=KXBTC15M`
+  
+  Popular options:
+  - `KXBTC15M` - Bitcoin 15-minute price markets
+  - `KXETH15M` - Ethereum 15-minute price markets
+</ParamField>
+
+### Timing
+
+<ParamField path="POLL_SECONDS" type="number" default="5">
+  How often to check for new markets and price updates (in seconds).
+  
+  **Example:** `POLL_SECONDS=5`
+</ParamField>
+
+<ParamField path="MOMENTUM_WINDOW_SECONDS" type="number" default="60">
+  Lookback window for BTC momentum strategy (in seconds).
+  
+  The bot compares current BTC price to the price from this many seconds ago to determine momentum direction.
+  
+  **Example:** `MOMENTUM_WINDOW_SECONDS=60`
+</ParamField>
+
+## CONSENSUS Strategy Risk Controls
+
+These parameters control risk management for the CONSENSUS and CONSENSUS_2 strategies:
+
+<ParamField path="CONSENSUS_RISK_PCT" type="number" default="0.01">
+  Target risk per trade as a percentage of bankroll.
+  
+  **Example:** `CONSENSUS_RISK_PCT=0.01` (risk 1% of bankroll per trade)
+</ParamField>
+
+<ParamField path="CONSENSUS_MAX_RISK_PCT" type="number" default="0.02">
+  Maximum risk per trade as a percentage of bankroll.
+  
+  **Example:** `CONSENSUS_MAX_RISK_PCT=0.02` (max 2% of bankroll per trade)
+</ParamField>
+
+<ParamField path="CONSENSUS_MAX_PRICE" type="number" default="0.55">
+  Maximum price to pay for a contract (0.00-1.00).
+  
+  Higher prices mean less edge. Only trades when ask price is below this threshold.
+  
+  **Example:** `CONSENSUS_MAX_PRICE=0.55` (skip trades above $0.55)
+</ParamField>
+
+<ParamField path="CONSENSUS_FEE_PCT" type="number" default="0.0">
+  Trading fee percentage to account for in P&L calculations.
+  
+  **Example:** `CONSENSUS_FEE_PCT=0.0` (0% fees)
+</ParamField>
+
+<ParamField path="CONSENSUS_ROLLING_WINDOW" type="number" default="30">
+  Number of recent trades to use for rolling performance metrics.
+  
+  The bot calculates win rate over the last N trades to ensure the strategy is still performing above break-even.
+  
+  **Example:** `CONSENSUS_ROLLING_WINDOW=30`
+</ParamField>
+
+### Loss Caps
+
+<ParamField path="CONSENSUS_DAILY_LOSS_CAP_R" type="number" default="3">
+  Daily loss cap in R-multiples (where R = CONSENSUS_RISK_PCT × bankroll).
+  
+  Trading stops for the day if daily losses exceed this threshold.
+  
+  **Example:** `CONSENSUS_DAILY_LOSS_CAP_R=3` (stop after losing 3R in one day)
+</ParamField>
+
+<ParamField path="CONSENSUS_WEEKLY_LOSS_CAP_R" type="number" default="8">
+  Weekly loss cap in R-multiples.
+  
+  Trading stops for the week if weekly losses exceed this threshold.
+  
+  **Example:** `CONSENSUS_WEEKLY_LOSS_CAP_R=8` (stop after losing 8R in one week)
+</ParamField>
+
+## Output Configuration
+
+<ParamField path="MOCK_TRADES_CSV_PATH" type="string" default="data/mock_trades.csv">
+  CSV file path for paper trading results from `bot.py`.
+  
+  **Example:** `MOCK_TRADES_CSV_PATH=data/mock_trades.csv`
+</ParamField>
+
+<ParamField path="CONSENSUS_TRADES_CSV" type="string" default="data/consensus_trades.csv">
+  CSV file path for real trading results from `consensus.py`.
+  
+  **Example:** `CONSENSUS_TRADES_CSV=data/consensus_trades.csv`
+</ParamField>
+
+## Example Configurations
+
+### Conservative Paper Trading
+
+```bash
+# Safe testing configuration
+KALSHI_USE_DEMO=true
+DRY_RUN=true
+STAKE_USD=2
+INITIAL_BANKROLL_USD=200
+CONSENSUS_RISK_PCT=0.005
+CONSENSUS_MAX_RISK_PCT=0.01
+CONSENSUS_MAX_PRICE=0.50
+```
+
+### Aggressive Real Trading
+
+```bash
+# Live trading with higher risk
+KALSHI_API_KEY_ID=your-key-id
+KALSHI_PRIVATE_KEY_PATH=~/.key/kalshi/key
+KALSHI_USE_DEMO=false
+DRY_RUN=false
+STAKE_USD=10
+INITIAL_BANKROLL_USD=1000
+CONSENSUS_RISK_PCT=0.02
+CONSENSUS_MAX_RISK_PCT=0.05
+CONSENSUS_MAX_PRICE=0.60
+```
+
+<Warning>
+  Only use aggressive configurations after extensive testing in demo mode. Start with conservative settings and scale up gradually.
+</Warning>
+
+## Validation
+
+Before running the bot, verify your configuration:
+
+<Steps>
+  <Step title="Check API credentials">
+    Ensure `KALSHI_API_KEY_ID` and `KALSHI_PRIVATE_KEY_PATH` are set correctly for real trading.
+  </Step>
+  
+  <Step title="Verify safety settings">
+    Confirm `DRY_RUN=true` and `KALSHI_USE_DEMO=true` for initial testing.
+  </Step>
+  
+  <Step title="Review risk parameters">
+    Calculate maximum position size: `INITIAL_BANKROLL_USD × CONSENSUS_MAX_RISK_PCT`
+  </Step>
+  
+  <Step title="Test connectivity">
+    Run the bot briefly to verify API connection and market data retrieval.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Running the Bot" icon="play" href="/guides/running-bot">
+    Learn how to run paper and real trading modes
+  </Card>
+  <Card title="Analyzing Results" icon="chart-line" href="/guides/analyzing-results">
+    Understand trading performance metrics
+  </Card>
+</CardGroup>

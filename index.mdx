@@ -1,97 +1,108 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Simple Kalshi Bot"
+description: "Algorithmic trading bot for Kalshi markets with genetic algorithm optimization"
 ---
 
-## Setting up
+## Welcome to Simple Kalshi Bot
 
-Get your documentation site up and running in minutes.
+An algorithmic trading system for Kalshi prediction markets featuring multiple trading strategies, paper trading simulation, and genetic algorithm optimization for strategy evolution.
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
+<CardGroup cols={2}>
   <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
+    title="Quick Start"
+    icon="rocket"
+    href="/quickstart"
   >
-    Edit your docs locally and preview them in real time.
+    Get started with paper trading in under 5 minutes
   </Card>
   <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
+    title="Trading Strategies"
+    icon="chart-line"
+    href="/strategies/overview"
   >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+    Explore PREVIOUS, MOMENTUM, and CONSENSUS strategies
   </Card>
   <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
+    title="Genetic Algorithm"
+    icon="dna"
+    href="/genetic/introduction"
   >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
-
-## Create beautiful pages
-
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+    Evolve trading strategies using genetic algorithms
   </Card>
   <Card
-    title="Code samples"
+    title="API Reference"
     icon="code"
-    href="/essentials/code"
+    href="/api/bot"
   >
-    Add sample code to demonstrate how to use your product.
+    Complete API documentation for all modules
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+</CardGroup>
 
-## Need inspiration?
+## Key Features
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={3}>
+  <Card title="Paper Trading" icon="file-invoice-dollar">
+    Simulate trades with CSV logging and real-time statistics
+  </Card>
+  <Card title="Real Trading" icon="money-bill-transfer">
+    Execute real trades on Kalshi with authenticated API
+  </Card>
+  <Card title="Multiple Strategies" icon="brain">
+    PREVIOUS, MOMENTUM, CONSENSUS, and genetic evolution
+  </Card>
+  <Card title="Risk Management" icon="shield-check">
+    Position sizing, loss limits, and price constraints
+  </Card>
+  <Card title="BTC Markets" icon="bitcoin">
+    Specialized support for BTC 15-minute markets
+  </Card>
+  <Card title="Demo Mode" icon="flask">
+    Test strategies safely with Kalshi demo API
+  </Card>
+</CardGroup>
+
+## Getting Started
+
+<Steps>
+  <Step title="Install Dependencies">
+    Install Python dependencies and configure your environment
+    
+    ```bash
+    pip install -r requirements.txt
+    cp .env.example .env
+    ```
+  </Step>
+  
+  <Step title="Run Paper Trading">
+    Start the paper trading bot to simulate strategies
+    
+    ```bash
+    python3 bot.py
+    ```
+  </Step>
+  
+  <Step title="Analyze Results">
+    Review your trade history and performance statistics
+    
+    ```bash
+    cat data/mock_trades.csv
+    ```
+  </Step>
+</Steps>
+
+## Trading Strategies
+
+<CardGroup cols={2}>
+  <Card title="PREVIOUS Strategy" icon="clock-rotate-left" href="/strategies/previous">
+    Follow the trend by buying the same side as the previous market result
+  </Card>
+  <Card title="MOMENTUM Strategy" icon="arrow-trend-up" href="/strategies/momentum">
+    Trade based on BTC spot price direction over the last 60 seconds
+  </Card>
+  <Card title="CONSENSUS Strategy" icon="handshake" href="/strategies/consensus">
+    Only trade when PREVIOUS and MOMENTUM signals agree
+  </Card>
+  <Card title="Genetic Evolution" icon="dna" href="/genetic/introduction">
+    Evolve optimal trading strategies using genetic algorithms
+  </Card>
+</CardGroup>

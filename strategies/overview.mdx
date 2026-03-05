@@ -1,0 +1,183 @@
+---
+title: "Trading Strategies Overview"
+description: "Overview of all available trading strategies in the Simple Kalshi Bot"
+---
+
+The Simple Kalshi Bot implements multiple automated trading strategies for KXBTC15M markets (Bitcoin price direction over 15-minute windows). Each strategy uses different signals and risk management approaches.
+
+## Available Strategies
+
+### Core Strategies
+
+<CardGroup cols={2}>
+  <Card title="PREVIOUS" icon="clock-rotate-left" href="/strategies/previous">
+    Trend-following strategy that bets on the same outcome as the previous market
+  </Card>
+  
+  <Card title="MOMENTUM" icon="chart-line" href="/strategies/momentum">
+    Directional strategy based on Bitcoin spot price movement over 60 seconds
+  </Card>
+  
+  <Card title="CONSENSUS" icon="handshake" href="/strategies/consensus">
+    Combined strategy that only trades when PREVIOUS and MOMENTUM signals agree
+  </Card>
+  
+  <Card title="MOMENTUM_15" icon="arrows-up-down">
+    Extended momentum strategy using the full 15-minute window
+  </Card>
+</CardGroup>
+
+### Enhanced Variants
+
+<CardGroup cols={2}>
+  <Card title="PREVIOUS_2" icon="tag">
+    Value-seeking variant that waits for favorable prices (≤ $0.45)
+  </Card>
+  
+  <Card title="CONSENSUS_2" icon="circle-check">
+    Enhanced consensus with dynamic position sizing and loss limits
+  </Card>
+  
+  <Card title="ARBITRAGE" icon="scale-balanced">
+    Market-making strategy that captures edge through two-leg execution
+  </Card>
+</CardGroup>
+
+## Strategy Comparison
+
+| Strategy | Signal Source | Entry Timing | Risk Management | Best For |
+|----------|---------------|--------------|-----------------|----------|
+| **PREVIOUS** | Previous market result | Immediate on new market | Fixed stake | Strong trends |
+| **MOMENTUM** | BTC price (60s) | Immediate on new market | Fixed stake | Short-term volatility |
+| **CONSENSUS** | Both signals agree | When signals align | Position sizing + loss caps | High conviction trades |
+| **MOMENTUM_15** | BTC price (15min) | Immediate on new market | Fixed stake | Longer trends |
+| **PREVIOUS_2** | Previous result | Wait for price ≤ $0.45 | Fixed stake | Value opportunities |
+| **CONSENSUS_2** | Both signals agree | Wait for price ≤ $0.45 | Dynamic sizing + loss caps | Risk-managed consensus |
+| **ARBITRAGE** | Market inefficiency | Immediate two-leg | Capped at $10 | Market spreads |
+
+## Implementation Details
+
+### Market Lifecycle
+
+All strategies operate on the same market lifecycle:
+
+1. **Market Detection**: Bot polls for open KXBTC15M markets every 5 seconds
+2. **Signal Generation**: Strategies compute their signals when a new market opens
+3. **Trade Execution**: Eligible strategies place orders based on their rules
+4. **Settlement**: Bot monitors markets for results and updates P&L
+
+### Data Sources
+
+<CodeGroup>
+```python BTC Price (Coinbase)
+def get_btc_price():
+    """Get current BTC price from Coinbase."""
+    resp = requests.get(
+        "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+        timeout=10
+    )
+    resp.raise_for_status()
+    return float(resp.json()["data"]["amount"])
+```
+
+```python Market Data (Kalshi)
+def get_open_market():
+    """Get the next expiring open KXBTC15M market."""
+    params = {"series_ticker": SERIES_TICKER, "status": "open", "limit": 50}
+    resp = requests.get(f"{API_BASE}/markets", params=params, timeout=20)
+    resp.raise_for_status()
+    
+    now = datetime.now(timezone.utc)
+    candidates = []
+    
+    for market in resp.json().get("markets", []):
+        close_time = market.get("close_time")
+        if not close_time:
+            continue
+        
+        exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+        if exp > now:
+            candidates.append((exp, market))
+    
+    if not candidates:
+        return None
+    
+    _, best = min(candidates, key=lambda x: x[0])
+    return best
+```
+</CodeGroup>
+
+## Performance Tracking
+
+The bot tracks performance metrics for each strategy:
+
+```python
+def calc_stats(trades, strategy=None):
+    """Calculate stats from trades, optionally filtered by strategy."""
+    total_staked = 0.0
+    total_profit = 0.0
+    wins = 0
+    losses = 0
+    pending = 0
+    
+    for t in trades:
+        if strategy and t.get("strategy") != strategy:
+            continue
+        total_staked += float(t.get("stake_usd", 0))
+        profit = t.get("profit_usd", "")
+        if profit != "":
+            p = float(profit)
+            total_profit += p
+            if p > 0:
+                wins += 1
+            else:
+                losses += 1
+        else:
+            pending += 1
+    
+    return {
+        "total_staked": total_staked,
+        "total_profit": total_profit,
+        "wins": wins,
+        "losses": losses,
+        "pending": pending,
+    }
+```
+
+## Configuration
+
+Key configuration parameters in `bot.py`:
+
+```python
+SERIES_TICKER = "KXBTC15M"              # Market series
+POLL_SECONDS = 5                        # Polling interval
+STAKE_USD = 5.0                         # Fixed stake for simple strategies
+MOMENTUM_WINDOW_SECONDS = 60            # Momentum lookback period
+MOMENTUM_15_WINDOW_SECONDS = 15 * 60    # Extended momentum period
+DEAL_MAX_PRICE = 0.45                   # Max price for _2 variants
+ARBITRAGE_MAX_BET_USD = 10.0            # Arbitrage position limit
+```
+
+<Note>
+All trades are logged to `data/mock_trades.csv` with full execution details including entry price, contracts, outcome, and realized P&L.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="PREVIOUS Strategy" icon="arrow-right" href="/strategies/previous">
+    Learn about trend-following with market results
+  </Card>
+  
+  <Card title="MOMENTUM Strategy" icon="arrow-right" href="/strategies/momentum">
+    Understand BTC price direction signals
+  </Card>
+  
+  <Card title="CONSENSUS Strategy" icon="arrow-right" href="/strategies/consensus">
+    Explore the combined signal approach
+  </Card>
+  
+  <Card title="Configuration" icon="arrow-right" href="/guides/configuration">
+    Configure strategy parameters
+  </Card>
+</CardGroup>

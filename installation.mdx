@@ -1,0 +1,367 @@
+---
+title: "Installation"
+description: "Complete setup and configuration guide for Simple Kalshi Bot"
+---
+
+This guide covers everything you need to install, configure, and run Simple Kalshi Bot.
+
+## System Requirements
+
+- **Python**: Version 3.7 or higher
+- **Operating System**: Linux, macOS, or Windows
+- **Internet**: Stable connection for API calls
+- **Disk Space**: ~10 MB for code and dependencies
+
+## Installation Steps
+
+<Steps>
+  <Step title="Install Python">
+    If you don't have Python installed:
+    
+    <CodeGroup>
+    ```bash macOS (Homebrew)
+    brew install python3
+    ```
+    
+    ```bash Ubuntu/Debian
+    sudo apt update
+    sudo apt install python3 python3-pip
+    ```
+    
+    ```bash Windows
+    # Download from https://www.python.org/downloads/
+    # Make sure to check "Add Python to PATH" during installation
+    ```
+    </CodeGroup>
+    
+    Verify installation:
+    
+    ```bash
+    python3 --version
+    # Should show: Python 3.7.0 or higher
+    ```
+  </Step>
+
+  <Step title="Get the Source Code">
+    Clone the repository or download the source:
+    
+    ```bash
+    git clone <repository-url>
+    cd simple-kalshi-bot
+    ```
+    
+    Alternatively, download the ZIP file and extract it:
+    
+    ```bash
+    unzip simple-kalshi-bot.zip
+    cd simple-kalshi-bot
+    ```
+  </Step>
+
+  <Step title="Install Python Dependencies">
+    Install required packages from `requirements.txt`:
+    
+    ```bash
+    pip install -r requirements.txt
+    ```
+    
+    Or install packages individually:
+    
+    ```bash
+    pip install requests>=2.31.0
+    pip install python-dotenv>=1.0.1
+    pip install cryptography>=41.0.0
+    ```
+    
+    <Note>
+      If you get a "permission denied" error, try using `pip install --user` instead.
+    </Note>
+  </Step>
+
+  <Step title="Create Configuration File">
+    Copy the example environment file:
+    
+    ```bash
+    cp .env.example .env
+    ```
+    
+    The `.env` file controls all bot behavior. See the Configuration section below for details.
+  </Step>
+
+  <Step title="Create Data Directory">
+    The bot will create this automatically, but you can do it manually:
+    
+    ```bash
+    mkdir -p data
+    ```
+    
+    This is where trade CSV files are stored.
+  </Step>
+</Steps>
+
+## Configuration
+
+Edit the `.env` file to customize bot behavior. Here are all available options:
+
+### Basic Settings
+
+```bash .env
+# Environment: true = demo API, false = production API
+KALSHI_USE_DEMO=true
+
+# Trading mode: true = paper trading only, false = live trading
+DRY_RUN=true
+
+# Stake per trade in USD (for most strategies)
+STAKE_USD=5
+
+# Market series to monitor
+KALSHI_EVENT_TICKER_PREFIX=KXBTC15M
+
+# How often to poll for updates (seconds)
+POLL_SECONDS=5
+```
+
+<Warning>
+**Always keep `DRY_RUN=true` for paper trading.** This bot is designed for paper trading only. Real trading requires additional implementation and API credentials.
+</Warning>
+
+### Strategy Parameters
+
+```bash .env
+# Lookback window for MOMENTUM strategy (seconds)
+MOMENTUM_WINDOW_SECONDS=60
+
+# Initial bankroll for CONSENSUS strategies (USD)
+INITIAL_BANKROLL_USD=500
+
+# CONSENSUS position sizing (percentage of bankroll)
+CONSENSUS_RISK_PCT=0.01          # 1% per trade
+CONSENSUS_MAX_RISK_PCT=0.02      # 2% maximum
+
+# CONSENSUS price filter (skip trades above this price)
+CONSENSUS_MAX_PRICE=0.55
+
+# CONSENSUS fee percentage (for simulation)
+CONSENSUS_FEE_PCT=0.0            # 0% (Kalshi has no fees currently)
+
+# CONSENSUS rolling performance window
+CONSENSUS_ROLLING_WINDOW=30      # Last 30 trades
+
+# CONSENSUS loss caps (in multiples of R)
+CONSENSUS_DAILY_LOSS_CAP_R=3     # Stop after -3R daily loss
+CONSENSUS_WEEKLY_LOSS_CAP_R=8    # Stop after -8R weekly loss
+```
+
+<Note>
+**What is "R"?** R is your risk unit, calculated as `bankroll × CONSENSUS_RISK_PCT`. For a $500 bankroll at 1% risk, R = $5. A daily loss cap of 3R means the bot stops trading CONSENSUS strategies after losing $15 in a day.
+</Note>
+
+### Output Files
+
+```bash .env
+# CSV file for all mock trades
+MOCK_TRADES_CSV_PATH=data/mock_trades.csv
+
+# CSV for consensus strategy trades (legacy)
+CONSENSUS_TRADES_CSV=data/consensus_trades.csv
+```
+
+### API Credentials (Optional)
+
+<Note>
+**Not required for paper trading.** The bot only uses public market data APIs. These fields are reserved for future real trading functionality.
+</Note>
+
+```bash .env
+# Kalshi API credentials (not needed for paper trading)
+KALSHI_API_KEY_ID=your-api-key-id
+KALSHI_PRIVATE_KEY_PATH=~/.key/kalshi/key
+```
+
+## Running the Bot
+
+### Basic Usage
+
+Start the bot with default settings:
+
+```bash
+python3 bot.py
+```
+
+### Running in Background
+
+To run the bot in the background and log output:
+
+<CodeGroup>
+```bash Linux/macOS
+# Using nohup
+nohup python3 bot.py > bot.log 2>&1 &
+
+# View logs
+tail -f bot.log
+
+# Stop the bot
+pkill -f bot.py
+```
+
+```bash Using screen
+# Start a screen session
+screen -S kalshi-bot
+
+# Run the bot
+python3 bot.py
+
+# Detach: Press Ctrl+A, then D
+# Reattach later:
+screen -r kalshi-bot
+```
+
+```bash Using tmux
+# Start a tmux session
+tmux new -s kalshi-bot
+
+# Run the bot
+python3 bot.py
+
+# Detach: Press Ctrl+B, then D
+# Reattach later:
+tmux attach -t kalshi-bot
+```
+</CodeGroup>
+
+### Stopping the Bot
+
+Gracefully stop the bot:
+
+```bash
+# If running in foreground
+Ctrl+C
+
+# If running in background
+pkill -f bot.py
+```
+
+The bot will display final statistics when stopped.
+
+## Troubleshooting
+
+### "No module named 'requests'" Error
+
+The dependencies aren't installed. Run:
+
+```bash
+pip install -r requirements.txt
+```
+
+### "Permission denied" Error
+
+Try installing packages in user mode:
+
+```bash
+pip install --user -r requirements.txt
+```
+
+### "No open KXBTC15M market found"
+
+This can happen during market hours gaps or if using production API outside trading hours. The bot will keep polling until a market opens.
+
+### BTC Price Errors
+
+If you see `[BTC price error: ...]`, the Coinbase API is temporarily unavailable. The bot will continue running but MOMENTUM strategies won't execute until BTC prices are available again.
+
+### CSV File Location
+
+By default, trades are saved to `data/mock_trades.csv` relative to the bot directory. Check your `.env` file for the configured path.
+
+## File Structure
+
+After installation, your directory should look like:
+
+```bash
+simple-kalshi-bot/
+├── bot.py                    # Main bot script
+├── requirements.txt          # Python dependencies
+├── .env.example             # Example configuration
+├── .env                     # Your configuration (create this)
+├── README.md                # Project documentation
+└── data/                    # Created automatically
+    └── mock_trades.csv      # Trade history
+```
+
+## Updating the Bot
+
+To update to the latest version:
+
+```bash
+# Pull latest changes (if using git)
+git pull
+
+# Reinstall dependencies (in case they changed)
+pip install -r requirements.txt
+
+# Your .env and data files are preserved
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first paper trades
+  </Card>
+  <Card title="Configuration Guide" icon="sliders" href="/guides/configuration">
+    Deep dive into all configuration options
+  </Card>
+  <Card title="Strategy Guide" icon="chess" href="/strategies/overview">
+    Understand how each trading strategy works
+  </Card>
+  <Card title="Analysis" icon="chart-bar" href="/guides/analyzing-results">
+    Analyze your trade data and performance
+  </Card>
+</CardGroup>
+
+## Advanced: Virtual Environment (Recommended)
+
+For a cleaner installation, use a Python virtual environment:
+
+<Steps>
+  <Step title="Create Virtual Environment">
+    ```bash
+    python3 -m venv venv
+    ```
+  </Step>
+  
+  <Step title="Activate Virtual Environment">
+    <CodeGroup>
+    ```bash Linux/macOS
+    source venv/bin/activate
+    ```
+    
+    ```bash Windows
+    venv\Scripts\activate
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Install Dependencies">
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Step>
+  
+  <Step title="Run the Bot">
+    ```bash
+    python bot.py
+    ```
+  </Step>
+  
+  <Step title="Deactivate When Done">
+    ```bash
+    deactivate
+    ```
+  </Step>
+</Steps>
+
+<Note>
+When using a virtual environment, you need to activate it each time before running the bot.
+</Note>

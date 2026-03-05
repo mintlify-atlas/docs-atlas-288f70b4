@@ -1,0 +1,475 @@
+---
+title: "Genome Structure"
+description: "Complete reference for the 22 genes that define trading strategies"
+---
+
+## Overview
+
+Each bot's trading strategy is encoded in a **Genome** containing 22 floating-point genes. All gene values are normalized to the range [0.0, 1.0], then decoded into actual trading parameters.
+
+```python
+@dataclass
+class Genome:
+    id: str  # Unique 8-character hex ID
+    generation: int  # Generation number
+    parent_ids: list[str]  # Parent genome IDs
+    
+    # 22 evolvable genes (all in [0.0, 1.0])
+    # ... gene definitions ...
+```
+
+## Gene Categories
+
+Genes are organized into 5 functional categories:
+
+- **Market Selection** (5 genes): Which markets to trade
+- **Entry Signals** (8 genes): When to enter positions
+- **Side Selection** (2 genes): Bias toward yes/no
+- **Position Sizing** (3 genes): How much to risk
+- **Risk Management** (4 genes): Loss limits and boundaries
+
+## Market Selection Genes
+
+These genes filter which markets the bot will consider trading.
+
+### min_volume_24h
+
+<ParamField path="min_volume_24h" type="float" default="0.5">
+  Minimum 24-hour trading volume required.
+  
+  **Decoding:**
+  ```python
+  min_volume = gene_value * 5_000
+  # Range: 0 to 5,000 contracts
+  ```
+  
+  **Example:**
+  - `0.0` → 0 (trade any volume)
+  - `0.5` → 2,500 contracts
+  - `1.0` → 5,000 contracts (high-volume only)
+</ParamField>
+
+### min_open_interest
+
+<ParamField path="min_open_interest" type="float" default="0.5">
+  Minimum open interest (total contracts held) required.
+  
+  **Decoding:**
+  ```python
+  min_oi = gene_value * 2_000
+  # Range: 0 to 2,000 contracts
+  ```
+</ParamField>
+
+### min_time_to_expiry_hrs
+
+<ParamField path="min_time_to_expiry_hrs" type="float" default="0.3">
+  Minimum time until market closes (hours).
+  
+  **Decoding:**
+  ```python
+  min_tte = gene_value * 24
+  # Range: 0 to 24 hours
+  # Ensures min_tte < max_tte after decode
+  ```
+  
+  **Example:**
+  - `0.0` → 0h (trade markets closing any time)
+  - `0.5` → 12h (avoid markets closing too soon)
+  - `1.0` → 24h (only trade far-dated markets)
+</ParamField>
+
+### max_time_to_expiry_hrs
+
+<ParamField path="max_time_to_expiry_hrs" type="float" default="0.7">
+  Maximum time until market closes (hours).
+  
+  **Decoding:**
+  ```python
+  max_tte = gene_value * 24
+  # Range: 0 to 24 hours
+  # Ensures min_tte < max_tte after decode
+  ```
+</ParamField>
+
+### category_mask
+
+<ParamField path="category_mask" type="float" default="0.5">
+  Bit mask for selecting market categories.
+  
+  **Decoding:**
+  ```python
+  cat_bits = int(gene_value * (2**n_categories - 1))
+  selected_cats = [categories[i] for i in range(n_categories) if cat_bits & (1 << i)]
+  # If nothing selected, trade all categories
+  ```
+  
+  **Example** (with 4 categories: ['sports', 'finance', 'politics', 'climate']):
+  - `0.0` → binary `0000` → all categories (fallback)
+  - `0.25` → binary `0011` → sports + finance
+  - `0.75` → binary `1100` → politics + climate
+  - `1.0` → binary `1111` → all categories
+</ParamField>
+
+<Note>
+The feed only provides markets closing within 24 hours, so the effective range for time-to-expiry is 0-24 hours.
+</Note>
+
+## Entry Signal Genes
+
+These genes determine when and how the bot enters positions.
+
+### signal_type
+
+<ParamField path="signal_type" type="float" default="0.5">
+  Discretized into one of 5 signal strategies.
+  
+  **Decoding:**
+  ```python
+  SIGNAL_TYPES = ["price_level", "momentum", "mean_reversion", "value", "contrarian"]
+  signal_idx = min(int(gene_value * 5), 4)
+  signal_type = SIGNAL_TYPES[signal_idx]
+  ```
+  
+  **Signal Types:**
+  
+  | Gene Range | Index | Signal Type | Strategy |
+  |------------|-------|-------------|----------|
+  | 0.00-0.19  | 0     | price_level | Buy when ask is in target range |
+  | 0.20-0.39  | 1     | momentum    | Follow price direction |
+  | 0.40-0.59  | 2     | mean_reversion | Buy deviations from mean |
+  | 0.60-0.79  | 3     | value       | Buy cheapest side vs 50/50 |
+  | 0.80-1.00  | 4     | contrarian  | Bet against confident crowd |
+</ParamField>
+
+### price_threshold_low
+
+<ParamField path="price_threshold_low" type="float" default="0.3">
+  Lower bound for price_level signal.
+  
+  **Decoding:**
+  ```python
+  threshold_low = 0.01 + gene_value * 0.49
+  # Range: 0.01 to 0.50 (1¢ to 50¢)
+  ```
+  
+  Used by `price_level` signal: buy when `threshold_low <= ask <= threshold_high`.
+</ParamField>
+
+### price_threshold_high
+
+<ParamField path="price_threshold_high" type="float" default="0.7">
+  Upper bound for price_level signal.
+  
+  **Decoding:**
+  ```python
+  threshold_high = 0.50 + gene_value * 0.49
+  # Range: 0.50 to 0.99 (50¢ to 99¢)
+  ```
+</ParamField>
+
+### momentum_lookback
+
+<ParamField path="momentum_lookback" type="float" default="0.5">
+  How many ticks to look back for momentum calculation.
+  
+  **Decoding:**
+  ```python
+  lookback_ticks = max(1, int(gene_value * 60))
+  # Range: 1 to 60 ticks (~30 seconds to 30 minutes)
+  ```
+  
+  Used by `momentum` signal to compute price change percentage over time.
+</ParamField>
+
+### momentum_trigger
+
+<ParamField path="momentum_trigger" type="float" default="0.5">
+  Percentage change threshold to trigger momentum trade.
+  
+  **Decoding:**
+  ```python
+  trigger_pct = -0.10 + gene_value * 0.20
+  # Range: -10% to +10%
+  ```
+  
+  **Example:**
+  - If price increased by more than `trigger_pct`, buy YES
+  - If price decreased by more than `-trigger_pct`, buy NO
+</ParamField>
+
+### mean_rev_zscore
+
+<ParamField path="mean_rev_zscore" type="float" default="0.5">
+  Z-score threshold for mean reversion signal.
+  
+  **Decoding:**
+  ```python
+  zscore_threshold = 0.5 + gene_value * 2.5
+  # Range: 0.5 to 3.0 standard deviations
+  ```
+  
+  Used by `mean_reversion` signal:
+  - If price > mean + threshold * stdev → buy NO (expect reversion down)
+  - If price < mean - threshold * stdev → buy YES (expect reversion up)
+</ParamField>
+
+### value_edge_min
+
+<ParamField path="value_edge_min" type="float" default="0.5">
+  Minimum edge vs fair value (50¢) to trigger value trade.
+  
+  **Decoding:**
+  ```python
+  edge_min = 0.01 + gene_value * 0.29
+  # Range: 0.01 to 0.30 (1¢ to 30¢ edge)
+  ```
+  
+  Used by `value` signal:
+  - Buy YES if `yes_ask < 0.50 - edge_min` (cheap)
+  - Buy NO if `no_ask < 0.50 - edge_min` (cheap)
+</ParamField>
+
+### contrarian_threshold
+
+<ParamField path="contrarian_threshold" type="float" default="0.5">
+  Price level above which to bet against the crowd.
+  
+  **Decoding:**
+  ```python
+  threshold = 0.60 + gene_value * 0.35
+  # Range: 0.60 to 0.95 (60¢ to 95¢)
+  ```
+  
+  Used by `contrarian` signal:
+  - If `yes_ask > threshold` → buy NO (crowd too bullish)
+  - If `no_ask > threshold` → buy YES (crowd too bearish)
+</ParamField>
+
+## Side Selection Genes
+
+These genes introduce bias in which side (yes/no) the bot prefers.
+
+### side_bias
+
+<ParamField path="side_bias" type="float" default="0.5">
+  Overall bias toward YES or NO.
+  
+  **Decoding:**
+  ```python
+  if bias < 0.2:
+      always_trade_NO()
+  elif bias > 0.8:
+      always_trade_YES()
+  else:
+      follow_signal()  # Use signal's recommended side
+  ```
+  
+  **Example:**
+  - `0.0` → Always bet NO
+  - `0.5` → No bias, follow signal
+  - `1.0` → Always bet YES
+</ParamField>
+
+### side_flip_prob
+
+<ParamField path="side_flip_prob" type="float" default="0.0">
+  Probability of flipping the signal's recommended side.
+  
+  **Decoding:**
+  ```python
+  flip_prob = gene_value * 0.5
+  # Range: 0% to 50% chance of flip
+  ```
+  
+  Adds randomness/exploration to side selection.
+</ParamField>
+
+## Position Sizing Genes
+
+These genes control how much capital to allocate per trade.
+
+### bankroll_fraction
+
+<ParamField path="bankroll_fraction" type="float" default="0.02">
+  Fraction of current equity to risk per trade.
+  
+  **Decoding:**
+  ```python
+  fraction = 0.005 + gene_value * 0.095
+  # Range: 0.5% to 10% of equity
+  ```
+  
+  **Example** (with $100 equity):
+  - `0.0` → $0.50 per trade
+  - `0.5` → $5.25 per trade
+  - `1.0` → $10.00 per trade
+</ParamField>
+
+### max_concurrent_positions
+
+<ParamField path="max_concurrent_positions" type="float" default="0.3">
+  Maximum number of open positions at once.
+  
+  **Decoding:**
+  ```python
+  max_concurrent = max(1, int(gene_value * 20))
+  # Range: 1 to 20 positions
+  ```
+  
+  Prevents over-diversification or concentration.
+</ParamField>
+
+### max_single_market_pct
+
+<ParamField path="max_single_market_pct" type="float" default="0.5">
+  Maximum percentage of equity in a single market.
+  
+  **Decoding:**
+  ```python
+  max_pct = 0.01 + gene_value * 0.24
+  # Range: 1% to 25% of equity
+  ```
+</ParamField>
+
+## Risk Management Genes
+
+These genes define hard limits to protect capital.
+
+### daily_loss_limit_pct
+
+<ParamField path="daily_loss_limit_pct" type="float" default="0.5">
+  Maximum daily loss as percentage of equity.
+  
+  **Decoding:**
+  ```python
+  loss_limit = 0.02 + gene_value * 0.28
+  # Range: 2% to 30% daily loss limit
+  ```
+  
+  Bot stops trading for the day if `daily_pnl <= -equity * loss_limit`.
+</ParamField>
+
+### max_trades_per_day
+
+<ParamField path="max_trades_per_day" type="float" default="0.5">
+  Maximum number of trades per day.
+  
+  **Decoding:**
+  ```python
+  max_trades = max(1, int(gene_value * 100))
+  # Range: 1 to 100 trades/day
+  ```
+</ParamField>
+
+### min_price
+
+<ParamField path="min_price" type="float" default="0.1">
+  Minimum ask price to consider trading.
+  
+  **Decoding:**
+  ```python
+  raw_min = 0.01 + gene_value * 0.49
+  min_price = min(raw_min, max_price)  # Ensure min < max
+  # Range: 1¢ to 50¢
+  ```
+  
+  Markets with both sides below this price are filtered out.
+</ParamField>
+
+### max_price
+
+<ParamField path="max_price" type="float" default="0.9">
+  Maximum ask price to consider trading.
+  
+  **Decoding:**
+  ```python
+  raw_max = 0.50 + gene_value * 0.49
+  max_price = max(raw_max, min_price)  # Ensure max > min
+  # Range: 50¢ to 99¢
+  ```
+</ParamField>
+
+## Gene Decoding Example
+
+Here's a complete example of decoding a genome:
+
+```python
+from genetic.genome import Genome, decode_genome
+
+# Create a genome
+genome = Genome(
+    min_volume_24h=0.8,
+    signal_type=0.45,  # Will decode to "mean_reversion"
+    bankroll_fraction=0.3,
+    # ... other genes ...
+)
+
+# Decode into trading parameters
+known_categories = ["sports", "finance", "politics", "climate"]
+params = decode_genome(genome, known_categories)
+
+print(params)
+# Output:
+# {
+#   "min_volume_24h": 4000.0,
+#   "signal_type": "mean_reversion",
+#   "bankroll_fraction": 0.0335,  # 3.35%
+#   "categories": ["sports", "finance"],  # Based on category_mask
+#   ...
+# }
+```
+
+## Gene Inheritance
+
+Genes are passed to offspring through:
+
+1. **Elitism**: Top 5 bots keep exact gene values
+2. **Crossover**: Each gene randomly chosen from parent A or B
+3. **Mutation**: Each gene has 15% chance of Gaussian perturbation
+
+See [Evolution Operators](/genetic/operators) for details.
+
+## Creating Custom Genomes
+
+```python
+# Random genome (uniform [0,1] for all genes)
+genome = Genome.random(generation=0)
+
+# Clone with new ID
+child = genome.clone()
+
+# Manual genome
+custom = Genome(
+    generation=0,
+    signal_type=0.5,  # mean_reversion
+    bankroll_fraction=0.1,  # Conservative sizing
+    min_time_to_expiry_hrs=0.8,  # Far-dated markets only
+)
+
+# Serialize
+data = genome.to_dict()
+with open("genome.json", "w") as f:
+    json.dump(data, f)
+
+# Deserialize
+with open("genome.json") as f:
+    data = json.load(f)
+loaded = Genome.from_dict(data)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Fitness Evaluation" icon="medal" href="/genetic/fitness">
+    How genomes are scored based on trading performance
+  </Card>
+  
+  <Card title="Evolution Operators" icon="shuffle" href="/genetic/operators">
+    Selection, crossover, and mutation mechanics
+  </Card>
+  
+  <Card title="Analysis" icon="chart-mixed" href="/genetic/analysis">
+    Analyzing gene distributions and correlations
+  </Card>
+</CardGroup>

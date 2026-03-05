@@ -1,0 +1,205 @@
+---
+title: "PREVIOUS Strategy"
+description: "Trend-following strategy that bets on the same outcome as the previous market result"
+---
+
+The **PREVIOUS** strategy is a simple trend-following approach that assumes recent market outcomes will continue. When a new KXBTC15M market opens, it places a bet on the same side (YES or NO) that won in the previous market.
+
+## Strategy Logic
+
+The strategy operates on a straightforward hypothesis: if Bitcoin's price moved up (or down) in the last 15-minute window, it's likely to continue in the same direction for the next window.
+
+### Signal Generation
+
+<Steps>
+  <Step title="Detect Market Rollover">
+    When the bot detects a new market has opened, it marks the previous market ticker for signal generation.
+  </Step>
+  
+  <Step title="Wait for Settlement">
+    The strategy waits for the previous market to settle and determine whether YES or NO won.
+  </Step>
+  
+  <Step title="Copy the Result">
+    Once settled, the strategy places the same bet on the new market (if previous was YES, bet YES; if NO, bet NO).
+  </Step>
+</Steps>
+
+## Implementation
+
+Here's the core implementation from `bot.py`:
+
+```python
+# bot.py:382-414
+if pending_previous and ("PREVIOUS", ticker) not in traded_keys:
+    prev_market = get_market(pending_previous)
+    settled = get_settled_side(prev_market)
+    
+    if settled:
+        # Record signal
+        signals[ticker]["PREVIOUS"] = settled
+        
+        price = yes_ask if settled == "yes" else no_ask
+        contracts = STAKE_USD / price if price > 0 else 0
+        
+        trade = {
+            "time": now.isoformat(),
+            "strategy": "PREVIOUS",
+            "previous_ticker": pending_previous,
+            "previous_result": settled,
+            "buy_ticker": ticker,
+            "buy_side": settled,
+            "stake_usd": STAKE_USD,
+            "price_usd": round(price, 4),
+            "contracts": round(contracts, 4),
+            "outcome": "",
+            "payout_usd": "",
+            "profit_usd": "",
+        }
+        trades.append(trade)
+        save_trades(trades)
+        traded_keys.add(("PREVIOUS", ticker))
+        
+        print(f"  -> [PREVIOUS] BUY {settled} ${STAKE_USD} @ ${price:.4f}")
+    else:
+        print(f"  -> [PREVIOUS] Waiting for {pending_previous} to settle...")
+```
+
+### Settlement Detection
+
+The bot determines which side won by checking the market result:
+
+```python
+# bot.py:76-82
+def get_settled_side(market):
+    """Return 'yes' or 'no' if market is settled, else None."""
+    result = market.get("result")
+    if result in ("yes", "no"):
+        return result
+    return None
+```
+
+## Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `STAKE_USD` | `5.0` | Fixed amount to bet on each trade |
+| `POLL_SECONDS` | `5` | How often to check for new markets |
+
+<Note>
+The PREVIOUS strategy uses fixed position sizing - it always stakes exactly `$5.00` regardless of price or market conditions.
+</Note>
+
+## Risk Characteristics
+
+### Advantages
+
+<Icon icon="check" iconType="solid" /> **Simplicity**: Easy to understand and debug
+
+<Icon icon="check" iconType="solid" /> **Low Latency**: Executes immediately when previous market settles
+
+<Icon icon="check" iconType="solid" /> **Trend Capture**: Performs well during sustained directional moves
+
+### Limitations
+
+<Icon icon="xmark" iconType="solid" /> **Mean Reversion**: Loses money when trends reverse
+
+<Icon icon="xmark" iconType="solid" /> **No Price Filter**: Will pay any price for the signal
+
+<Icon icon="xmark" iconType="solid" /> **No Risk Management**: Fixed stake regardless of bankroll or drawdowns
+
+## When to Use
+
+This strategy works best in:
+
+- **Trending markets**: When Bitcoin price shows sustained directional movement
+- **High momentum environments**: During periods of strong buying or selling pressure
+- **Testing and baseline**: As a benchmark to compare more sophisticated strategies against
+
+<Warning>
+Avoid using PREVIOUS as your only strategy. It has no awareness of price inefficiencies or bankroll management, which can lead to significant drawdowns during choppy or mean-reverting markets.
+</Warning>
+
+## PREVIOUS_2 Variant
+
+The **PREVIOUS_2** variant adds a price filter:
+
+```python
+# bot.py:619-643
+if ("PREVIOUS_2", ticker) not in traded_keys:
+    prev_signal = signals[ticker].get("PREVIOUS")
+    if prev_signal:
+        price = yes_ask if prev_signal == "yes" else no_ask
+        if 0 < price <= DEAL_MAX_PRICE:  # Only buy if price is good
+            contracts = STAKE_USD / price
+            trade = {
+                "time": now.isoformat(),
+                "strategy": "PREVIOUS_2",
+                "previous_ticker": pending_previous or "",
+                "previous_result": prev_signal,
+                "buy_ticker": ticker,
+                "buy_side": prev_signal,
+                "stake_usd": STAKE_USD,
+                "price_usd": round(price, 4),
+                "contracts": round(contracts, 4),
+                "outcome": "",
+                "payout_usd": "",
+                "profit_usd": "",
+            }
+            trades.append(trade)
+            save_trades(trades)
+            traded_keys.add(("PREVIOUS_2", ticker))
+            print(f"  -> [PREVIOUS_2] BUY {prev_signal} ${STAKE_USD} @ ${price:.4f}")
+```
+
+<Tip>
+**PREVIOUS_2** waits for the PREVIOUS signal side to reach `$0.45` or less before entering. This filters for better risk/reward opportunities but may miss trades when markets are trending strongly.
+</Tip>
+
+## Performance Monitoring
+
+The bot outputs real-time P&L for PREVIOUS strategy:
+
+```bash
+[12:34:56] KXBTC15M-24MAR05-T1245 (180s) | yes=$0.52 no=$0.48 | BTC=95,234 | 
+           P:$+2.50 M:$-1.20 C:$+3.75 ...
+```
+
+Where:
+- `P:$+2.50` = PREVIOUS strategy cumulative profit/loss
+- Strategy positions are tracked in `data/mock_trades.csv`
+
+## Example Trade Flow
+
+<Steps>
+  <Step title="Market KXBTC15M-A settles at YES">
+    Bitcoin price increased during the 15-minute window. PREVIOUS records this signal.
+  </Step>
+  
+  <Step title="New market KXBTC15M-B opens">
+    Bot detects market rollover and activates PREVIOUS strategy.
+  </Step>
+  
+  <Step title="Execute trade">
+    PREVIOUS buys YES side on KXBTC15M-B at current ask price ($0.53).
+    - Stake: $5.00
+    - Contracts: 9.43 (= $5.00 / $0.53)
+  </Step>
+  
+  <Step title="Market KXBTC15M-B settles at YES">
+    Trade wins, payout = 9.43 contracts = $9.43
+    - Profit: $4.43
+  </Step>
+</Steps>
+
+## Related Strategies
+
+<CardGroup cols={2}>
+  <Card title="MOMENTUM Strategy" icon="chart-line" href="/strategies/momentum">
+    Uses actual BTC price movement instead of market results
+  </Card>
+  
+  <Card title="CONSENSUS Strategy" icon="handshake" href="/strategies/consensus">
+    Combines PREVIOUS with MOMENTUM for higher conviction
+  </Card>
+</CardGroup>

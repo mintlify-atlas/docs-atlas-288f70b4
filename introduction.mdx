@@ -1,0 +1,123 @@
+---
+title: "Introduction"
+description: "An automated trading bot that paper-trades multiple strategies on Kalshi Bitcoin markets"
+---
+
+Welcome to Simple Kalshi Bot, a sophisticated paper trading system designed to test and analyze multiple trading strategies on Kalshi's Bitcoin 15-minute (KXBTC15M) prediction markets.
+
+## What is Simple Kalshi Bot?
+
+Simple Kalshi Bot is an automated trading system that simulates trades across seven different strategies without risking real capital. All trades are "mock" trades - meaning they're tracked and analyzed as if they were real, but no actual money is spent.
+
+This makes it perfect for:
+- Testing trading strategies in real market conditions
+- Learning how prediction markets work
+- Analyzing strategy performance with zero risk
+- Developing and backtesting algorithmic trading ideas
+
+## How It Works
+
+The bot continuously monitors Kalshi's KXBTC15M markets (Bitcoin price prediction markets that settle every 15 minutes) and executes paper trades based on various strategies:
+
+<CardGroup cols={2}>
+  <Card title="PREVIOUS" icon="arrow-trend-up">
+    Follows the trend by buying the same side as the previous market's settled result
+  </Card>
+  <Card title="MOMENTUM" icon="chart-line">
+    Buys based on Bitcoin spot price direction over the last 60 seconds from Coinbase
+  </Card>
+  <Card title="CONSENSUS" icon="handshake">
+    Only trades when PREVIOUS and MOMENTUM both agree on the same direction
+  </Card>
+  <Card title="MOMENTUM_15" icon="clock">
+    Uses a longer 15-minute lookback window for BTC price momentum
+  </Card>
+  <Card title="PREVIOUS_2" icon="tag">
+    Waits for PREVIOUS signal at favorable prices ($0.45 or below)
+  </Card>
+  <Card title="CONSENSUS_2" icon="circle-check">
+    Waits for CONSENSUS signal at favorable prices ($0.45 or below)
+  </Card>
+  <Card title="ARBITRAGE" icon="scale-balanced">
+    Attempts to lock in risk-free profits by hedging both sides when prices allow
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Real-Time Market Data
+The bot polls Kalshi's public API every 5 seconds to get live market prices and settlement data, giving you real-time strategy performance.
+
+### Multiple Strategies Running Simultaneously
+All seven strategies run in parallel on the same market, allowing you to compare their performance side-by-side.
+
+### Comprehensive CSV Tracking
+Every trade is logged with timestamps, entry prices, outcomes, and profit/loss calculations. This makes it easy to analyze performance in spreadsheet tools.
+
+### Risk Management Controls
+The CONSENSUS strategies include sophisticated risk management:
+- Position sizing based on bankroll percentage
+- Daily and weekly loss caps
+- Rolling win-rate analysis
+- Maximum price filters
+
+### No Real Trading
+All trades are simulated. The bot never places real orders or requires API credentials for trading. It only reads public market data.
+
+## Market Overview
+
+The bot focuses on **KXBTC15M** markets on Kalshi:
+
+- **Market Type**: Binary prediction market (YES/NO)
+- **Question**: Will Bitcoin price be higher or lower than a strike price at expiration?
+- **Frequency**: New markets every 15 minutes
+- **Settlement**: Automatic based on Coinbase BTC-USD price
+- **Pricing**: Markets trade between $0.01 and $0.99 per contract
+- **Payout**: $1.00 per winning contract
+
+<Note>
+The bot uses Kalshi's **demo API** by default, which provides realistic market data without requiring an account. You can switch to production API data in the configuration.
+</Note>
+
+## Sample Output
+
+When running, the bot displays real-time status:
+
+```bash
+[14:32:15] KXBTC15M-24MAR05-T1445 (847s) | yes=$0.52 no=$0.51 | BTC=94,234 | 
+P:$-2.50 M:$+1.75 C:$+3.20 M15:$-0.80 P2:$+0.45 C2:$+1.10 A:$+0.25 CB:$503.20
+
+  -> [CONSENSUS] Both agree yes (UP) -> BUY 12 ($6.24) @ $0.52
+  ** [PREVIOUS] SETTLED KXBTC15M-24MAR05-T1430: WIN $+4.20
+```
+
+## Performance Tracking
+
+All trades are saved to `data/mock_trades.csv` with complete details:
+
+| Column | Description |
+|--------|-------------|
+| `time` | ISO timestamp of the trade |
+| `strategy` | Which strategy made the trade |
+| `buy_ticker` | Market ticker being traded |
+| `buy_side` | `yes` or `no` |
+| `stake_usd` | Amount staked |
+| `price_usd` | Entry price per contract |
+| `contracts` | Number of contracts purchased |
+| `outcome` | `WIN`, `LOSS`, or empty if pending |
+| `profit_usd` | Net profit or loss |
+
+<Warning>
+This is an educational and research tool. Past performance in paper trading does not guarantee future results in real trading. Always test thoroughly before risking real capital.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup instructions
+  </Card>
+</CardGroup>

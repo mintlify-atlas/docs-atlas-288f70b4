@@ -1,0 +1,421 @@
+---
+title: "CONSENSUS Strategy"
+description: "Advanced strategy that only trades when PREVIOUS and MOMENTUM signals agree, with dynamic position sizing and risk management"
+---
+
+The **CONSENSUS** strategy is the most sophisticated approach in the Simple Kalshi Bot. It combines two independent signals—PREVIOUS (trend following) and MOMENTUM (BTC price direction)—and only places trades when both agree. This confirmation-based approach includes advanced risk management features like dynamic position sizing, loss caps, and rolling performance monitoring.
+
+## Strategy Logic
+
+CONSENSUS requires **unanimous agreement** between:
+
+1. **PREVIOUS signal**: Which side won the last market?
+2. **MOMENTUM signal**: Is BTC price moving up or down over the last 60 seconds?
+
+Only when both signals point to the same side (both YES or both NO) does the strategy execute a trade.
+
+### Why Consensus Works
+
+By requiring two independent signals to align, CONSENSUS:
+- **Filters noise**: Reduces false signals from any single indicator
+- **Increases conviction**: Higher probability when multiple factors agree
+- **Reduces trade frequency**: Only takes high-quality setups
+
+<Note>
+CONSENSUS typically trades less frequently than PREVIOUS or MOMENTUM alone, but with better risk-adjusted returns.
+</Note>
+
+## Implementation
+
+### Signal Collection
+
+CONSENSUS reuses the signals already computed by PREVIOUS and MOMENTUM:
+
+```python
+# bot.py:506-517
+if ("CONSENSUS", ticker) not in traded_keys:
+    prev_signal = signals[ticker].get("PREVIOUS")
+    mom_signal = signals[ticker].get("MOMENTUM")
+    
+    if prev_signal and mom_signal and prev_signal == mom_signal:
+        side = prev_signal  # Both agree
+        
+        price = yes_ask if side == "yes" else no_ask
+        if price <= 0:
+            traded_keys.add(("CONSENSUS", ticker))
+            print(f"  -> [CONSENSUS] Skip - invalid price ({price})")
+            time.sleep(POLL_SECONDS)
+            continue
+```
+
+### Price Filter
+
+CONSENSUS enforces a maximum entry price:
+
+```python
+# bot.py:520-526
+if price > CONSENSUS_MAX_PRICE:
+    traded_keys.add(("CONSENSUS", ticker))
+    print(
+        f"  -> [CONSENSUS] Skip - ask ${price:.4f} > max ${CONSENSUS_MAX_PRICE:.2f}"
+    )
+    time.sleep(POLL_SECONDS)
+    continue
+```
+
+<Tip>
+`CONSENSUS_MAX_PRICE` defaults to `0.55` (configurable via env var). This ensures the strategy only enters when risk/reward is favorable.
+</Tip>
+
+### Dynamic Position Sizing
+
+Unlike simple strategies with fixed stakes, CONSENSUS sizes positions based on bankroll:
+
+```python
+# bot.py:528-587
+bankroll = consensus_bankroll(trades)
+if bankroll <= 0:
+    traded_keys.add(("CONSENSUS", ticker))
+    print("  -> [CONSENSUS] Skip - bankroll depleted")
+    time.sleep(POLL_SECONDS)
+    continue
+
+r_value = max(bankroll * CONSENSUS_RISK_PCT, 0.01)
+target_stake = bankroll * CONSENSUS_RISK_PCT
+max_stake = bankroll * CONSENSUS_MAX_RISK_PCT
+stake = min(max(target_stake, 0.01), max_stake, bankroll)
+contracts = int(stake / price)
+
+if contracts < 1:
+    traded_keys.add(("CONSENSUS", ticker))
+    print(
+        f"  -> [CONSENSUS] Skip - stake ${stake:.2f} too small for ask ${price:.4f}"
+    )
+    time.sleep(POLL_SECONDS)
+    continue
+
+max_contracts = int(max_stake / price)
+contracts = min(contracts, max_contracts)
+if contracts < 1:
+    traded_keys.add(("CONSENSUS", ticker))
+    print("  -> [CONSENSUS] Skip - exceeds max risk per trade")
+    time.sleep(POLL_SECONDS)
+    continue
+
+stake = contracts * price
+```
+
+**Bankroll calculation** tracks realized P&L:
+
+```python
+# bot.py:158-164
+def consensus_bankroll(trades):
+    """Current consensus bankroll from realized P&L."""
+    realized = sum(
+        float(t.get("profit_usd", 0))
+        for t in settled_consensus(trades)
+    )
+    return INITIAL_BANKROLL_USD + realized
+```
+
+### Loss Caps
+
+CONSENSUS implements daily and weekly loss limits:
+
+```python
+# bot.py:535-552
+r_value = max(bankroll * CONSENSUS_RISK_PCT, 0.01)
+daily_cap = CONSENSUS_DAILY_LOSS_CAP_R * r_value
+weekly_cap = CONSENSUS_WEEKLY_LOSS_CAP_R * r_value
+day_pnl, week_pnl = consensus_period_pnl(trades, now)
+
+if day_pnl <= -daily_cap:
+    traded_keys.add(("CONSENSUS", ticker))
+    print(
+        f"  -> [CONSENSUS] Skip - daily loss cap hit ({day_pnl:+.2f} <= -{daily_cap:.2f})"
+    )
+    time.sleep(POLL_SECONDS)
+    continue
+
+if week_pnl <= -weekly_cap:
+    traded_keys.add(("CONSENSUS", ticker))
+    print(
+        f"  -> [CONSENSUS] Skip - weekly loss cap hit ({week_pnl:+.2f} <= -{weekly_cap:.2f})"
+    )
+    time.sleep(POLL_SECONDS)
+    continue
+```
+
+### Rolling Performance Monitoring
+
+The strategy checks if recent performance exceeds break-even win rate:
+
+```python
+# bot.py:188-218
+def rolling_consensus_metrics(trades):
+    """Return rolling consensus performance and break-even win rate."""
+    settled = settled_consensus(trades)
+    if not settled:
+        return {
+            "sample_size": 0,
+            "win_rate": 0.0,
+            "break_even_win_rate": 1.0,
+        }
+    
+    window = settled[-CONSENSUS_ROLLING_WINDOW:]
+    profits = [float(t.get("profit_usd", 0)) for t in window]
+    wins = [p for p in profits if p > 0]
+    losses = [p for p in profits if p <= 0]
+    sample_size = len(window)
+    win_rate = len(wins) / sample_size if sample_size else 0.0
+    
+    if wins and losses:
+        avg_win = sum(wins) / len(wins)
+        avg_loss = abs(sum(losses) / len(losses))
+        break_even = avg_loss / (avg_win + avg_loss) if (avg_win + avg_loss) else 1.0
+    elif wins and not losses:
+        break_even = 0.0
+    else:
+        break_even = 1.0
+    
+    return {
+        "sample_size": sample_size,
+        "win_rate": win_rate,
+        "break_even_win_rate": break_even,
+    }
+```
+
+The strategy halts trading if win rate falls below break-even:
+
+```python
+# bot.py:554-565
+rolling = rolling_consensus_metrics(trades)
+if (
+    rolling["sample_size"] >= CONSENSUS_ROLLING_WINDOW
+    and rolling["win_rate"] < rolling["break_even_win_rate"]
+):
+    traded_keys.add(("CONSENSUS", ticker))
+    print(
+        "  -> [CONSENSUS] Skip - rolling win rate below break-even "
+        f"({rolling['win_rate']*100:.1f}% < {rolling['break_even_win_rate']*100:.1f}%)"
+    )
+    time.sleep(POLL_SECONDS)
+    continue
+```
+
+## Configuration
+
+CONSENSUS has extensive configuration options (all via environment variables):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `INITIAL_BANKROLL_USD` | `500` | Starting capital for position sizing |
+| `CONSENSUS_RISK_PCT` | `0.01` (1%) | Target stake as % of bankroll |
+| `CONSENSUS_MAX_RISK_PCT` | `0.02` (2%) | Maximum stake as % of bankroll |
+| `CONSENSUS_MAX_PRICE` | `0.55` | Highest acceptable entry price |
+| `CONSENSUS_FEE_PCT` | `0.0` | Trading fees (if applicable) |
+| `CONSENSUS_ROLLING_WINDOW` | `30` | Number of recent trades for performance check |
+| `CONSENSUS_DAILY_LOSS_CAP_R` | `3` | Max daily loss (in R multiples) |
+| `CONSENSUS_WEEKLY_LOSS_CAP_R` | `8` | Max weekly loss (in R multiples) |
+
+<Note>
+The "R" in loss caps refers to `r_value = bankroll * CONSENSUS_RISK_PCT`. For example, with a $500 bankroll and 1% risk:
+- R = $5
+- Daily cap = 3R = $15
+- Weekly cap = 8R = $40
+</Note>
+
+## Risk Characteristics
+
+### Advantages
+
+<Icon icon="check" iconType="solid" /> **Signal confirmation**: Two independent signals reduce false positives
+
+<Icon icon="check" iconType="solid" /> **Dynamic sizing**: Stakes scale with bankroll (% risk model)
+
+<Icon icon="check" iconType="solid" /> **Loss protection**: Daily/weekly caps prevent catastrophic drawdowns
+
+<Icon icon="check" iconType="solid" /> **Performance awareness**: Stops trading when edge disappears
+
+<Icon icon="check" iconType="solid" /> **Price discipline**: Only enters at favorable prices
+
+### Limitations
+
+<Icon icon="xmark" iconType="solid" /> **Lower frequency**: Requires both signals to align, reducing trade count
+
+<Icon icon="xmark" iconType="solid" /> **Complexity**: More failure modes and configuration parameters
+
+<Icon icon="xmark" iconType="solid" /> **Whipsaw risk**: Can hit loss caps during choppy periods before edge returns
+
+## When to Use
+
+CONSENSUS is ideal for:
+
+- **Live trading**: The risk management makes it suitable for real capital
+- **Longer-term operation**: Daily/weekly caps smooth out variance over time
+- **High-conviction setups**: When you want quality over quantity
+- **Bankroll preservation**: Dynamic sizing protects against ruin
+
+<Warning>
+During extended drawdowns, CONSENSUS may stop trading entirely if:
+1. Bankroll is depleted
+2. Daily/weekly loss caps are hit
+3. Rolling win rate falls below break-even
+
+This is a **feature, not a bug**—it prevents throwing good money after bad.
+</Warning>
+
+## CONSENSUS_2 Variant
+
+The **CONSENSUS_2** variant adds the price filter from PREVIOUS_2:
+
+```python
+# bot.py:645-716
+if ("CONSENSUS_2", ticker) not in traded_keys:
+    prev_signal = signals[ticker].get("PREVIOUS")
+    mom_signal = signals[ticker].get("MOMENTUM")
+    if prev_signal and mom_signal and prev_signal == mom_signal:
+        side = prev_signal
+        price = yes_ask if side == "yes" else no_ask
+        if 0 < price <= DEAL_MAX_PRICE:  # Wait for good price
+            # ... same risk management as CONSENSUS ...
+```
+
+<Tip>
+**CONSENSUS_2** waits for the consensus side to reach `$0.45` or less. This:
+- Further reduces trade frequency
+- Improves risk/reward on entries
+- May miss strong trending opportunities
+</Tip>
+
+## Standalone Bot
+
+CONSENSUS has a production-ready standalone implementation in `consensus.py`:
+
+```python
+# consensus.py:268-282
+print("=" * 60)
+print("CONSENSUS STRATEGY BOT - REAL TRADING")
+print("=" * 60)
+print(f"Series: {SERIES_TICKER}")
+print(f"Stake: ${STAKE_USD} per trade")
+print(f"Momentum window: {MOMENTUM_WINDOW_SECONDS}s")
+print(f"Poll interval: {POLL_SECONDS}s")
+print(f"Trades CSV: {TRADES_CSV}")
+print(f"DRY RUN: {dry_run}")
+```
+
+Key differences from `bot.py` CONSENSUS:
+- Uses **Kalshi API authentication** (RSA key signing)
+- Supports **real order execution** (not just mock trades)
+- Has `DRY_RUN` mode for testing
+- Separate CSV output (`data/consensus_trades.csv`)
+
+### Running the Standalone Bot
+
+Required environment variables:
+
+```bash
+KALSHI_API_KEY_ID=your_api_key_id
+KALSHI_PRIVATE_KEY_PATH=~/.ssh/kalshi_private_key.pem
+KALSHI_USE_DEMO=true  # or false for production
+DRY_RUN=true          # true = simulate, false = real trades
+```
+
+Run the bot:
+
+```bash
+python consensus.py
+```
+
+<Warning>
+Set `DRY_RUN=false` only when you're ready to trade with real money. Start with `KALSHI_USE_DEMO=true` to test against Kalshi's demo environment.
+</Warning>
+
+## Example Trade Flow
+
+<Steps>
+  <Step title="Market A settles at YES">
+    Previous market result: BTC went up
+    - PREVIOUS signal = YES
+  </Step>
+  
+  <Step title="BTC momentum check">
+    Current BTC price vs. 60s ago: $95,450 vs. $95,200 (+0.26%)
+    - MOMENTUM signal = YES
+  </Step>
+  
+  <Step title="Consensus agreement">
+    Both signals = YES → CONSENSUS activates
+  </Step>
+  
+  <Step title="Risk checks">
+    ✓ Price = $0.48 (< max $0.55)
+    ✓ Bankroll = $515.30
+    ✓ Daily P&L = -$2.50 (above -$15.46 cap)
+    ✓ Weekly P&L = +$12.80 (above -$41.22 cap)
+    ✓ Rolling win rate = 56.7% (above 52.3% break-even)
+  </Step>
+  
+  <Step title="Position sizing">
+    - Target stake = $515.30 × 1% = $5.15
+    - Max stake = $515.30 × 2% = $10.31
+    - Actual stake = $5.15 (within limits)
+    - Contracts = 10 (int($5.15 / $0.48))
+    - Final stake = $4.80 (10 contracts × $0.48)
+  </Step>
+  
+  <Step title="Execute trade">
+    Buy 10 YES contracts at $0.48 = $4.80 total
+  </Step>
+  
+  <Step title="Settlement">
+    Market settles YES:
+    - Payout: $10.00
+    - Gross profit: $5.20
+    - Fee: $0.00
+    - Net profit: $5.20
+  </Step>
+</Steps>
+
+## Performance Monitoring
+
+Console output during trading:
+
+```bash
+[12:34:56] [LIVE] KXBTC15M-24MAR05-T1245 (180s) | yes=$0.52 no=$0.48 | BTC=95,234 | P&L: $+15.40
+  PREVIOUS signal: yes (from KXBTC15M-24MAR05-T1230)
+  MOMENTUM signal: yes (BTC +0.245%)
+  >>> CONSENSUS SIGNAL: YES <<<
+  Placing order: BUY 10 yes @ $0.48 ($4.80 total)
+  Order placed! ID: 01J9X...
+```
+
+Final stats:
+
+```bash
+==========================================================
+STOPPED - FINAL STATS
+==========================================================
+Total trades: 47
+Wins: 28 | Losses: 17 | Pending: 2
+Total staked: $234.50
+Total profit: $+42.30
+ROI: 18.0%
+```
+
+## Related Strategies
+
+<CardGroup cols={3}>
+  <Card title="PREVIOUS Strategy" icon="clock-rotate-left" href="/strategies/previous">
+    Learn about the trend-following signal component
+  </Card>
+  
+  <Card title="MOMENTUM Strategy" icon="chart-line" href="/strategies/momentum">
+    Understand the BTC price direction signal
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Configure CONSENSUS risk parameters
+  </Card>
+</CardGroup>
