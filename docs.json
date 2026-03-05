@@ -104,7 +104,12 @@
               "api/genetic/genome",
               "api/genetic/evolution",
               "api/genetic/engine",
-              "api/genetic/bot"
+              "api/genetic/bot",
+              "api/genetic/feed",
+              "api/genetic/monitor",
+              "api/genetic/persistence",
+              "api/genetic/export",
+              "api/genetic/runner"
             ]
           },
           {

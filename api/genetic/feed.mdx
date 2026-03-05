@@ -1,0 +1,336 @@
+---
+title: "Market Data Feed"
+description: "Centralized market data fetcher with shared state for trading bots"
+---
+
+## Overview
+
+The `feed.py` module provides a centralized, thread-safe market data feed that runs in the background and shares real-time market information across all trading bots. It continuously fetches open markets, tracks price history, and monitors settlements.
+
+## Classes
+
+### MarketSnapshot
+
+Immutable snapshot of a single market's state at a specific point in time.
+
+**Attributes:**
+
+<ParamField path="ticker" type="str" required>
+  Market ticker symbol
+</ParamField>
+
+<ParamField path="event_ticker" type="str" required>
+  Parent event ticker
+</ParamField>
+
+<ParamField path="status" type="str" required>
+  Market status: `"open"`, `"closed"`, or `"settled"`
+</ParamField>
+
+<ParamField path="result" type="str" required>
+  Settlement result: `"yes"`, `"no"`, or empty string for unsettled markets
+</ParamField>
+
+<ParamField path="yes_ask" type="float" required>
+  Yes side ask price in dollars (0.0 - 1.0)
+</ParamField>
+
+<ParamField path="no_ask" type="float" required>
+  No side ask price in dollars (0.0 - 1.0)
+</ParamField>
+
+<ParamField path="yes_bid" type="float" required>
+  Yes side bid price in dollars (0.0 - 1.0)
+</ParamField>
+
+<ParamField path="no_bid" type="float" required>
+  No side bid price in dollars (0.0 - 1.0)
+</ParamField>
+
+<ParamField path="last_price" type="float" required>
+  Last traded price in dollars (0.0 - 1.0)
+</ParamField>
+
+<ParamField path="volume_24h" type="float" required>
+  24-hour trading volume
+</ParamField>
+
+<ParamField path="open_interest" type="float" required>
+  Current open interest
+</ParamField>
+
+<ParamField path="close_time" type="datetime | None" required>
+  Market close time (None if not set)
+</ParamField>
+
+<ParamField path="category" type="str" required>
+  Market category (e.g., "politics", "economics")
+</ParamField>
+
+<ParamField path="title" type="str" required>
+  Market title/description
+</ParamField>
+
+<ParamField path="fetched_at" type="datetime" required>
+  Timestamp when this snapshot was fetched
+</ParamField>
+
+```python
+# Example usage
+snap = MarketSnapshot(
+    ticker="KXBTC-23DEC31-T50000",
+    event_ticker="KXBTC",
+    status="open",
+    result="",
+    yes_ask=0.45,
+    no_ask=0.56,
+    yes_bid=0.44,
+    no_bid=0.55,
+    last_price=0.45,
+    volume_24h=15000.0,
+    open_interest=8000.0,
+    close_time=datetime(2023, 12, 31),
+    category="crypto",
+    title="Will Bitcoin be above $50,000?",
+    fetched_at=datetime.now(timezone.utc)
+)
+```
+
+---
+
+### MarketHistory
+
+Rolling price history for a single market with automatic size limiting.
+
+**Attributes:**
+
+<ParamField path="ticker" type="str" required>
+  Market ticker symbol
+</ParamField>
+
+<ParamField path="yes_ask_history" type="list[tuple[datetime, float]]">
+  List of (timestamp, yes_ask_price) tuples. Automatically trimmed to `MARKET_HISTORY_MAX_TICKS`.
+</ParamField>
+
+**Methods:**
+
+#### append(ts: datetime, yes_ask: float)
+
+Append a new price observation to the history. Automatically trims the list to maintain the maximum size.
+
+<ParamField path="ts" type="datetime" required>
+  Timestamp of the observation
+</ParamField>
+
+<ParamField path="yes_ask" type="float" required>
+  Yes ask price at this timestamp
+</ParamField>
+
+```python
+history = MarketHistory(ticker="KXBTC-23DEC31-T50000")
+history.append(datetime.now(timezone.utc), 0.45)
+history.append(datetime.now(timezone.utc), 0.46)
+
+# Access history
+for ts, price in history.yes_ask_history:
+    print(f"{ts}: ${price:.2f}")
+```
+
+---
+
+### MarketDataFeed
+
+Centralized market data fetcher that runs in its own background thread. All bots read from shared state via public read methods.
+
+#### \_\_init\_\_(client, poll_interval: float = 30.0)
+
+<ParamField path="client" type="KalshiClient" required>
+  Authenticated Kalshi API client
+</ParamField>
+
+<ParamField path="poll_interval" type="float" default="30.0">
+  Seconds between market data fetches
+</ParamField>
+
+```python
+from kalshi_client import KalshiClient
+from genetic.feed import MarketDataFeed
+
+client = KalshiClient()
+feed = MarketDataFeed(client, poll_interval=30.0)
+```
+
+---
+
+#### start()
+
+Start the background fetch thread.
+
+```python
+feed.start()
+print("Market data feed running in background...")
+```
+
+---
+
+#### stop()
+
+Stop the background fetch thread (blocks up to 10 seconds).
+
+```python
+feed.stop()
+```
+
+---
+
+#### get_open_markets() → dict[str, MarketSnapshot]
+
+Return a copy of all currently open markets.
+
+<ResponseField name="markets" type="dict[str, MarketSnapshot]">
+  Dictionary mapping ticker symbols to market snapshots
+</ResponseField>
+
+```python
+markets = feed.get_open_markets()
+for ticker, snap in markets.items():
+    print(f"{ticker}: ${snap.yes_ask:.2f} (closes {snap.close_time})")
+```
+
+---
+
+#### get_market(ticker: str) → MarketSnapshot | None
+
+Get a specific market snapshot (checks both open and settled markets).
+
+<ParamField path="ticker" type="str" required>
+  Market ticker to retrieve
+</ParamField>
+
+<ResponseField name="snapshot" type="MarketSnapshot | None">
+  Market snapshot if found, None otherwise
+</ResponseField>
+
+```python
+market = feed.get_market("KXBTC-23DEC31-T50000")
+if market:
+    print(f"Status: {market.status}, Yes ask: ${market.yes_ask:.2f}")
+```
+
+---
+
+#### get_history(ticker: str) → list[tuple[datetime, float]]
+
+Get price history for a specific market.
+
+<ParamField path="ticker" type="str" required>
+  Market ticker to retrieve history for
+</ParamField>
+
+<ResponseField name="history" type="list[tuple[datetime, float]]">
+  List of (timestamp, yes_ask_price) tuples, empty list if ticker not found
+</ResponseField>
+
+```python
+history = feed.get_history("KXBTC-23DEC31-T50000")
+if len(history) >= 2:
+    old_price = history[0][1]
+    new_price = history[-1][1]
+    change = ((new_price - old_price) / old_price) * 100
+    print(f"Price change: {change:+.1f}%")
+```
+
+---
+
+#### get_settlement(ticker: str) → str | None
+
+Return settlement result if market is settled.
+
+<ParamField path="ticker" type="str" required>
+  Market ticker to check
+</ParamField>
+
+<ResponseField name="result" type="str | None">
+  `"yes"` or `"no"` if settled, None if not settled or not found
+</ResponseField>
+
+```python
+result = feed.get_settlement("KXBTC-23DEC31-T50000")
+if result:
+    print(f"Market settled: {result.upper()}")
+```
+
+---
+
+#### get_categories() → list[str]
+
+Return all known market categories.
+
+<ResponseField name="categories" type="list[str]">
+  Sorted list of category names (e.g., ["crypto", "economics", "politics"])
+</ResponseField>
+
+```python
+categories = feed.get_categories()
+print(f"Available categories: {', '.join(categories)}")
+```
+
+---
+
+#### get_stats() → dict
+
+Return feed statistics and health metrics.
+
+<ResponseField name="stats" type="dict">
+  Dictionary with keys:
+  - `open_markets`: Number of currently tracked open markets
+  - `settled_markets`: Number of recently settled markets in cache
+  - `categories`: Number of known categories
+  - `fetch_count`: Total successful fetches since start
+  - `error_count`: Total errors encountered
+</ResponseField>
+
+```python
+stats = feed.get_stats()
+print(f"Feed status: {stats['open_markets']} markets, "
+      f"{stats['fetch_count']} fetches, {stats['error_count']} errors")
+```
+
+---
+
+#### check_specific_tickers(tickers: set[str])
+
+Manually check specific tickers for settlement (used for positions we hold). This method queries individual markets directly rather than relying on bulk settlement checks.
+
+<ParamField path="tickers" type="set[str]" required>
+  Set of ticker symbols to check
+</ParamField>
+
+```python
+# Check if any of our open positions have settled
+open_positions = {"TICKER1", "TICKER2", "TICKER3"}
+feed.check_specific_tickers(open_positions)
+
+# Then check results
+for ticker in open_positions:
+    result = feed.get_settlement(ticker)
+    if result:
+        print(f"{ticker} settled: {result}")
+```
+
+## Internal State
+
+The feed maintains several internal data structures (thread-safe with RLock):
+
+- `markets`: Currently open markets (ticker → MarketSnapshot)
+- `histories`: Price histories (ticker → MarketHistory)
+- `settled`: Recently settled markets (kept for 2 hours)
+- `event_categories`: Event ticker to category mapping
+- `known_categories`: List of all discovered categories
+
+## Configuration
+
+The feed respects these configuration parameters from `genetic.config`:
+
+- `MARKET_CLOSE_WINDOW_HOURS`: Only fetch markets closing within this window
+- `MARKET_HISTORY_MAX_TICKS`: Maximum price history length per market

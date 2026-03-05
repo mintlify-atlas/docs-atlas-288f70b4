@@ -1,0 +1,296 @@
+---
+title: "State Persistence"
+description: "Save and load generation state for crash recovery and analysis"
+---
+
+## Overview
+
+The `persistence.py` module provides functions for saving and loading evolution state, enabling crash recovery, generation analysis, and hall of fame tracking. All state is stored as JSON in the `STATE_DIR` directory.
+
+## Functions
+
+### ensure_state_dir()
+
+Create the state directory if it doesn't exist.
+
+```python
+from genetic.persistence import ensure_state_dir
+
+ensure_state_dir()  # Creates STATE_DIR/
+```
+
+---
+
+### save_generation_state()
+
+Persist complete generation state for crash recovery and post-analysis.
+
+<ParamField path="generation" type="int" required>
+  Generation number
+</ParamField>
+
+<ParamField path="genomes" type="list[Genome]" required>
+  List of all genomes in this generation
+</ParamField>
+
+<ParamField path="fitness_scores" type="list[float]" required>
+  Fitness (ROI%) for each genome
+</ParamField>
+
+<ParamField path="stats" type="dict" required>
+  Generation statistics from compute_generation_stats()
+</ParamField>
+
+**Files Created:**
+- `STATE_DIR/gen_{generation:04d}.json` - Full generation data
+- `STATE_DIR/latest.json` - Pointer to most recent generation
+
+```python
+from genetic.persistence import save_generation_state
+
+genomes = [bot.genome for bot in bots]
+fitness = [evaluate_fitness(bot) for bot in bots]
+stats = compute_generation_stats(bots)
+
+save_generation_state(5, genomes, fitness, stats)
+# Creates: gen_0005.json and updates latest.json
+```
+
+**Saved Data Structure:**
+```json
+{
+  "generation": 5,
+  "timestamp": "2023-12-31T10:30:45.123456+00:00",
+  "genomes": [...],
+  "fitness_scores": [18.5, 15.2, 12.8, ...],
+  "stats": {
+    "best_roi": 18.5,
+    "median_roi": 8.2,
+    "mean_trades": 45.3,
+    ...
+  }
+}
+```
+
+---
+
+### save_checkpoint()
+
+Save a mid-generation checkpoint for crash recovery during trading.
+
+<ParamField path="generation" type="int" required>
+  Current generation number
+</ParamField>
+
+<ParamField path="bots" type="list[GeneticBot]" required>
+  List of all bots
+</ParamField>
+
+<ParamField path="tick_count" type="int" required>
+  Number of ticks completed
+</ParamField>
+
+**File Created:**
+- `STATE_DIR/checkpoint_gen{generation:04d}.json`
+
+```python
+from genetic.persistence import save_checkpoint
+from genetic.config import CHECKPOINT_INTERVAL_TICKS
+
+for tick in range(total_ticks):
+    # Trading logic
+    
+    if tick % CHECKPOINT_INTERVAL_TICKS == 0:
+        save_checkpoint(gen_num, bots, tick)
+```
+
+**Checkpoint Data:**
+Stores bot IDs, genome IDs, and account states (cash, trades, P&L, ROI) for recovery.
+
+---
+
+### load_latest_state() → tuple[int, list[Genome]] | None
+
+Load the most recently saved generation for crash recovery.
+
+<ResponseField name="state" type="tuple[int, list[Genome]] | None">
+  Tuple of (generation_number, genomes) if state found, None otherwise
+</ResponseField>
+
+```python
+from genetic.persistence import load_latest_state
+
+resumed = load_latest_state()
+if resumed:
+    gen_num, genomes = resumed
+    gen_num += 1  # Continue from next generation
+    print(f"Resumed from generation {gen_num - 1}")
+else:
+    gen_num = 0
+    genomes = [Genome.random(generation=0) for _ in range(POPULATION_SIZE)]
+    print("Starting fresh")
+```
+
+---
+
+### save_hall_of_fame()
+
+Update the hall of fame with top performers from this generation.
+
+<ParamField path="generation" type="int" required>
+  Generation number
+</ParamField>
+
+<ParamField path="top_entries" type="list[dict]" required>
+  List of top performer dictionaries (typically top 10 from generation)
+</ParamField>
+
+**File Updated:**
+- `STATE_DIR/hall_of_fame.json`
+
+**Behavior:**
+- Merges new entries with existing hall of fame
+- Deduplicates by genome ID (keeps newest performance data)
+- Sorts by fitness and keeps top 20 all-time
+- Tracks best-ever genome separately
+
+```python
+from genetic.persistence import save_hall_of_fame
+
+# Prepare top entries
+ranked = sorted(zip(fitness, bots), key=lambda x: x[0], reverse=True)
+top_entries = []
+for fit, bot in ranked[:10]:
+    top_entries.append({
+        "genome": bot.genome.to_dict(),
+        "fitness_roi_pct": fit,
+        "total_trades": bot.account.total_trades,
+        "settled_trades": bot.account.n_settled,
+        "win_rate": bot.account.win_rate,
+        "realized_pnl": bot.account.realized_pnl,
+        "generation": gen_num,
+        "signal_type": bot.params["signal_type"],
+        "params": bot.params,
+    })
+
+save_hall_of_fame(gen_num, top_entries)
+```
+
+**Hall of Fame Structure:**
+```json
+{
+  "updated_at": "2023-12-31T10:30:45+00:00",
+  "latest_generation": 10,
+  "best_ever": {
+    "genome": {...},
+    "fitness_roi_pct": 25.3,
+    "generation": 7,
+    "signal_type": "momentum",
+    ...
+  },
+  "entries": [
+    {"fitness_roi_pct": 25.3, ...},
+    {"fitness_roi_pct": 22.1, ...},
+    ...
+  ]
+}
+```
+
+---
+
+### load_hall_of_fame() → dict | None
+
+Load the hall of fame.
+
+<ResponseField name="hof" type="dict | None">
+  Hall of fame dictionary if found, None if file doesn't exist
+</ResponseField>
+
+```python
+from genetic.persistence import load_hall_of_fame
+
+hof = load_hall_of_fame()
+if hof:
+    best = hof["best_ever"]
+    print(f"Best ever: {best['fitness_roi_pct']:.1f}% ROI "
+          f"(gen {best['generation']}, {best['signal_type']})")
+    
+    print(f"\nTop 5:")
+    for i, entry in enumerate(hof["entries"][:5]):
+        print(f"  {i+1}. {entry['fitness_roi_pct']:.1f}% "
+              f"(gen {entry['generation']})")
+```
+
+---
+
+### load_generation(generation: int) → dict | None
+
+Load a specific generation's full state for analysis.
+
+<ParamField path="generation" type="int" required>
+  Generation number to load
+</ParamField>
+
+<ResponseField name="state" type="dict | None">
+  Full generation state dictionary if found, None otherwise
+</ResponseField>
+
+```python
+from genetic.persistence import load_generation
+
+state = load_generation(5)
+if state:
+    print(f"Generation {state['generation']} at {state['timestamp']}")
+    print(f"Best ROI: {state['stats']['best_roi']:.2f}%")
+    print(f"Genomes: {len(state['genomes'])}")
+    
+    # Reconstruct genomes
+    from genetic.genome import Genome
+    genomes = [Genome.from_dict(g) for g in state["genomes"]]
+```
+
+## File Locations
+
+All persistence files are stored in `STATE_DIR` (configured in `genetic.config`, typically `data/evolution/state/`):
+
+- `gen_{generation:04d}.json` - Complete generation state
+- `checkpoint_gen{generation:04d}.json` - Mid-generation checkpoints
+- `latest.json` - Pointer to most recent generation
+- `hall_of_fame.json` - Top 20 performers across all generations
+
+## Recovery Workflow
+
+```python
+# Typical evolution startup with recovery
+from genetic.persistence import load_latest_state, save_generation_state
+
+# Try to resume
+resumed = load_latest_state()
+if resumed:
+    gen_num, genomes = resumed
+    gen_num += 1
+    print(f"Resuming from generation {gen_num}")
+else:
+    # Start fresh
+    gen_num = 0
+    genomes = [Genome.random(generation=0) for _ in range(POPULATION_SIZE)]
+    print("Starting new evolution")
+
+# Run evolution
+while True:
+    # ... run generation ...
+    
+    # Save state after each generation
+    save_generation_state(gen_num, genomes, fitness, stats)
+    save_hall_of_fame(gen_num, top_entries)
+    
+    # Evolve and continue
+    genomes = evolve(bots)
+    gen_num += 1
+```
+
+## Configuration
+
+Uses these constants from `genetic.config`:
+- `STATE_DIR`: Directory for all persistence files
+- `POPULATION_SIZE`: Expected genome count per generation

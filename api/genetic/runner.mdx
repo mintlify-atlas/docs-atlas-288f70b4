@@ -1,0 +1,408 @@
+---
+title: "Evolution Runner"
+description: "Main evolution loop and generation orchestration"
+---
+
+## Overview
+
+The `runner.py` module contains the main evolution loop that orchestrates the genetic algorithm training system. It manages the infinite evolution cycle, coordinates trading periods, handles crash recovery, and persists results.
+
+## Functions
+
+### run_evolution()
+
+Main entry point for the infinite evolution loop.
+
+**Behavior:**
+1. Sets up logging with `setup_logging()`
+2. Connects to Kalshi API
+3. Starts market data feed
+4. Waits for initial market data
+5. Attempts to resume from saved state or starts fresh
+6. Runs infinite evolution loop (Ctrl+C to stop gracefully)
+
+**Process:**
+- Each iteration runs one complete generation
+- Automatically saves state after each generation
+- Resumes from latest checkpoint on restart
+- Updates hall of fame with top performers
+- Evolves population for next generation
+
+```python
+from genetic.runner import run_evolution
+
+# Start the evolution (runs until interrupted)
+run_evolution()
+```
+
+**Console Output Example:**
+```
+============================================================
+  GENETIC ALGORITHM TRADING BOT - KALSHI
+============================================================
+Population: 50 | Bankroll: $100
+Generation: 24h | Tick: 30s
+Connected to Kalshi API: https://api.elections.kalshi.com
+Market data feed started, waiting for initial data...
+Feed ready: 342 markets (closing within window), 8 categories: 
+  ['crypto', 'economics', 'finance', 'politics', 'science', ...]
+
+Starting fresh with 50 random genomes
+
+============================================================
+GENERATION 0
+============================================================
+Created 50 bots, starting trading period...
+[Gen 0 | 2.5h] Active: 38/50 | Open: 85 | Trades: 234 | ...
+```
+
+**Graceful Shutdown:**
+- Press Ctrl+C to interrupt
+- Current generation state is saved
+- Resume anytime by running again
+
+---
+
+### main()
+
+CLI entry point that simply calls `run_evolution()`.
+
+```bash
+# Start evolution
+python -m genetic.runner
+
+# Or using the genetic module
+python -m genetic
+```
+
+---
+
+## Internal Functions
+
+### \_run\_generation()
+
+Run a single generation: create bots, trade, evaluate, evolve.
+
+<ParamField path="logger" type="logging.Logger" required>
+  Logger instance from setup_logging()
+</ParamField>
+
+<ParamField path="feed" type="MarketDataFeed" required>
+  Active market data feed
+</ParamField>
+
+<ParamField path="genomes" type="list[Genome]" required>
+  Population of genomes for this generation
+</ParamField>
+
+<ParamField path="gen_num" type="int" required>
+  Current generation number
+</ParamField>
+
+<ParamField path="known_categories" type="list[str]" required>
+  List of market categories (refreshed each generation)
+</ParamField>
+
+<ResponseField name="result" type="tuple[list[Genome], int]">
+  Tuple of (next_generation_genomes, next_generation_number)
+</ResponseField>
+
+**Process:**
+
+1. **Initialization**
+   - Refresh market categories from feed
+   - Create fresh `PaperTradingEngine`
+   - Instantiate `GeneticBot` for each genome
+
+2. **Trading Period**
+   - Duration: `GENERATION_DURATION_SECONDS` (typically 24 hours)
+   - Tick interval: `TICK_INTERVAL_SECONDS` (typically 30s)
+   - Each tick:
+     - Settle completed markets
+     - Each bot evaluates and trades
+     - Periodic progress logging
+     - Periodic checkpoints
+
+3. **Settlement Wait**
+   - After trading period, wait up to `SETTLEMENT_WAIT_HOURS` for positions to settle
+   - Polls every `SETTLEMENT_WAIT_POLL_SECONDS`
+   - Force-closes any remaining positions as losses if timeout
+
+4. **Evaluation & Evolution**
+   - Calculate fitness for all bots
+   - Save generation state
+   - Update hall of fame
+   - Evolve new population using `evolve()`
+
+**Interruption Handling:**
+- Can be interrupted (Ctrl+C) at any point
+- Saves current state before exiting
+- Handles interrupts during trading or settlement
+
+---
+
+### \_save\_and\_log()
+
+Evaluate fitness, save state, update hall of fame, log results.
+
+<ParamField path="logger" type="logging.Logger" required>
+  Logger instance
+</ParamField>
+
+<ParamField path="gen_num" type="int" required>
+  Generation number
+</ParamField>
+
+<ParamField path="bots" type="list[GeneticBot]" required>
+  All bots in generation
+</ParamField>
+
+<ParamField path="tick_count" type="int" required>
+  Number of ticks completed
+</ParamField>
+
+**Actions Performed:**
+1. Evaluate fitness (ROI%) for all bots
+2. Compute generation statistics
+3. Log generation summary with leaderboard
+4. Save complete generation state to JSON
+5. Update hall of fame with top 10 performers
+
+**Logged Information:**
+```
+Generation 5 stats:
+  Best ROI:    18.5%
+  Median ROI:  8.2%
+  Mean trades: 45.3
+  Active bots: 42/50
+
+Saved generation 5 state to data/evolution/state/gen_0005.json
+Hall of Fame updated: best ever = 25.3% ROI (gen 3, momentum)
+```
+
+---
+
+## Generation Lifecycle
+
+A complete generation follows this timeline:
+
+### Phase 1: Initialization (< 1 minute)
+- Refresh market categories
+- Create trading engine
+- Instantiate all bots with genomes
+
+### Phase 2: Trading Period (configurable, default 24 hours)
+```
+Tick 0    [Start]
+  ↓
+Tick 30   [After 15 minutes]
+  ↓       - Log progress
+Tick 60   [After 30 minutes]
+  ↓       - Save checkpoint
+Tick 120  [After 1 hour]
+  ↓       - Targeted settlement check
+  ⋮
+Tick 2880 [After 24 hours]
+          [End trading]
+```
+
+### Phase 3: Settlement Wait (0-2 hours)
+- Wait for open positions to settle naturally
+- Poll for settlements every 60 seconds
+- Force-close unsettled positions after timeout
+
+### Phase 4: Evaluation & Evolution (< 1 minute)
+- Calculate fitness scores
+- Generate statistics and leaderboard
+- Save state and update hall of fame
+- Create next generation via selection, crossover, mutation
+
+### Phase 5: Next Generation
+- Increment generation number
+- Loop back to Phase 1
+
+---
+
+## Configuration
+
+The runner uses these constants from `genetic.config`:
+
+<ParamField path="POPULATION_SIZE" type="int" default="50">
+  Number of bots per generation
+</ParamField>
+
+<ParamField path="INITIAL_BANKROLL" type="float" default="100.0">
+  Starting capital for each bot (USD)
+</ParamField>
+
+<ParamField path="GENERATION_DURATION_SECONDS" type="int" default="86400">
+  Trading period length (default: 24 hours)
+</ParamField>
+
+<ParamField path="TICK_INTERVAL_SECONDS" type="int" default="30">
+  Seconds between trading ticks
+</ParamField>
+
+<ParamField path="SETTLEMENT_WAIT_HOURS" type="float" default="2.0">
+  Maximum time to wait for positions to settle
+</ParamField>
+
+<ParamField path="SETTLEMENT_WAIT_POLL_SECONDS" type="int" default="60">
+  Polling interval during settlement wait
+</ParamField>
+
+<ParamField path="PROGRESS_LOG_INTERVAL_TICKS" type="int" default="30">
+  Ticks between progress logs (default: every 15 min)
+</ParamField>
+
+<ParamField path="CHECKPOINT_INTERVAL_TICKS" type="int" default="60">
+  Ticks between checkpoints (default: every 30 min)
+</ParamField>
+
+<ParamField path="SETTLEMENT_CHECK_TICKS" type="int" default="120">
+  Ticks between targeted settlement checks (default: every hour)
+</ParamField>
+
+---
+
+## Recovery & Resume
+
+The runner automatically handles crash recovery:
+
+```python
+# On startup
+resumed = load_latest_state()
+if resumed:
+    gen_num, genomes = resumed
+    gen_num += 1  # Start next generation
+    logger.info(f"Resumed from generation {gen_num - 1}")
+else:
+    gen_num = 0
+    genomes = [Genome.random(generation=0) for _ in range(POPULATION_SIZE)]
+    logger.info("Starting fresh with random genomes")
+```
+
+**Recovery Behavior:**
+- Loads `latest.json` to find most recent generation
+- Restores all genomes from that generation
+- Starts the **next** generation (does not replay)
+- Mid-generation crashes: restart from beginning of next generation
+
+**Checkpoint Usage:**
+Checkpoints are saved during trading but not used for recovery. They're primarily for debugging and analysis.
+
+---
+
+## Usage Examples
+
+### Basic Start
+
+```bash
+# Start evolution (runs forever until Ctrl+C)
+python -m genetic.runner
+```
+
+### With Custom Configuration
+
+```python
+# custom_evolution.py
+from genetic import config
+from genetic.runner import run_evolution
+
+# Override config
+config.POPULATION_SIZE = 100
+config.GENERATION_DURATION_SECONDS = 12 * 3600  # 12 hours
+config.TICK_INTERVAL_SECONDS = 60  # 1 minute
+
+# Run
+run_evolution()
+```
+
+### Monitoring Progress
+
+```bash
+# Tail the log file
+tail -f data/evolution/state/evolution.log
+
+# Watch hall of fame updates
+watch -n 60 'python -m genetic.export --show'
+```
+
+### Integration with Other Scripts
+
+```python
+import threading
+from genetic.runner import run_evolution
+
+# Run evolution in background thread
+evolution_thread = threading.Thread(target=run_evolution, daemon=True)
+evolution_thread.start()
+
+# Your other code here
+# ...
+
+# Wait for evolution (or let it run as daemon)
+evolution_thread.join()
+```
+
+---
+
+## Error Handling
+
+The runner handles various error scenarios:
+
+### No Markets Available
+```python
+if not feed.get_open_markets():
+    logger.error("No markets found. Check API credentials and connectivity.")
+    feed.stop()
+    sys.exit(1)
+```
+
+### Tick Errors
+```python
+try:
+    # Trading tick
+    for bot in bots:
+        bot.tick()
+except Exception as e:
+    logger.error(f"Tick error: {e}", exc_info=True)
+    time.sleep(TICK_INTERVAL_SECONDS)
+    # Continue to next tick
+```
+
+### Keyboard Interrupts
+```python
+except KeyboardInterrupt:
+    logger.info("Interrupted by user. Shutting down...")
+    _save_and_log(logger, gen_num, bots, tick_count)  # Save before exit
+    feed.stop()
+    logger.info("Done. Resume anytime with: python -m genetic")
+```
+
+---
+
+## Performance Considerations
+
+**Resource Usage:**
+- Memory: ~50-100 MB for 50 bots
+- CPU: Low (mostly sleeping between ticks)
+- Network: API calls every `TICK_INTERVAL_SECONDS`
+- Disk: ~10 MB per generation (state files)
+
+**Optimization Tips:**
+- Increase `TICK_INTERVAL_SECONDS` to reduce API calls
+- Decrease `POPULATION_SIZE` for faster generations
+- Adjust `GENERATION_DURATION_SECONDS` based on market activity
+- Run on a server for 24/7 operation
+
+**Scaling:**
+The single-threaded design is intentional to:
+- Avoid race conditions
+- Simplify debugging
+- Respect API rate limits
+
+For large-scale training, consider:
+- Running multiple independent evolutions in parallel
+- Using different configuration parameters
+- Merging hall of fame results post-hoc

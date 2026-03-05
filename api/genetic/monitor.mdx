@@ -1,0 +1,212 @@
+---
+title: "Monitoring & Logging"
+description: "Progress monitoring and logging utilities for the evolution loop"
+---
+
+## Overview
+
+The `monitor.py` module provides logging setup and progress monitoring functions for the genetic algorithm evolution loop. It handles dual logging (file + console), periodic progress reports, and generation summaries with leaderboards.
+
+## Functions
+
+### setup_logging() → logging.Logger
+
+Configure dual logging with file and console handlers.
+
+<ResponseField name="logger" type="logging.Logger">
+  Configured logger instance named "evolution"
+</ResponseField>
+
+**Behavior:**
+- Creates `STATE_DIR/evolution.log` for full debug logs
+- Outputs INFO+ messages to console with timestamps
+- Automatically creates state directory if missing
+- Prevents duplicate handlers on re-initialization
+
+```python
+from genetic.monitor import setup_logging
+
+logger = setup_logging()
+logger.info("Evolution started")
+logger.debug("Detailed debug info (file only)")
+```
+
+**Log Formats:**
+- File: `2023-12-31 10:30:45 [INFO] message`
+- Console: `[10:30:45] message`
+
+---
+
+### log_tick_progress()
+
+Log periodic progress during a generation's trading period.
+
+<ParamField path="logger" type="logging.Logger" required>
+  Logger instance from setup_logging()
+</ParamField>
+
+<ParamField path="gen_num" type="int" required>
+  Current generation number
+</ParamField>
+
+<ParamField path="tick_count" type="int" required>
+  Number of ticks elapsed in this generation
+</ParamField>
+
+<ParamField path="bots" type="list[GeneticBot]" required>
+  List of all bots in this generation
+</ParamField>
+
+<ParamField path="feed" type="MarketDataFeed | None">
+  Optional market data feed for unrealized ROI calculation
+</ParamField>
+
+**Output Example:**
+```
+[Gen 5 | 2.5h] Active: 45/50 | Open: 120 | Trades: 458 | Settled: 203 | 
+Est ROI: +15.2%/+8.1% | Realized: +12.3%/+6.5%
+```
+
+```python
+from genetic.monitor import log_tick_progress
+
+for tick in range(generation_ticks):
+    # ... trading logic ...
+    
+    if tick % PROGRESS_LOG_INTERVAL_TICKS == 0:
+        log_tick_progress(logger, gen_num, tick, bots, feed)
+```
+
+**Metrics Reported:**
+- Elapsed time in hours
+- Active bots (with at least one trade)
+- Total open positions across all bots
+- Total trades and settled positions
+- Best and median ROI (both estimated and realized)
+
+---
+
+### log_generation_summary()
+
+Log a complete generation summary with leaderboard after trading completes.
+
+<ParamField path="logger" type="logging.Logger" required>
+  Logger instance from setup_logging()
+</ParamField>
+
+<ParamField path="gen_num" type="int" required>
+  Generation number being summarized
+</ParamField>
+
+<ParamField path="bots" type="list[GeneticBot]" required>
+  List of all bots in this generation
+</ParamField>
+
+<ParamField path="fitness" type="list[float]" required>
+  Fitness scores (ROI percentages) for each bot
+</ParamField>
+
+**Output Example:**
+```
+======================================================================
+GENERATION 5 RESULTS
+======================================================================
+Rank  Bot ID         ROI%    Trades Settled  WinRate          Signal
+----------------------------------------------------------------------
+1     a1b2c3d4       18.5%      127      89    65.2%     momentum
+2     e5f6g7h8       15.2%       98      67    58.2%  price_level
+3     i9j0k1l2       12.8%      115      78    61.5%         value
+...
+
+Signal distribution: {'momentum': 15, 'price_level': 12, 'value': 10, ...}
+Top-10 category prefs: {'politics': 8, 'economics': 6, 'crypto': 4, ...}
+```
+
+```python
+from genetic.monitor import log_generation_summary
+from genetic.evolution import evaluate_fitness
+
+# After generation completes
+fitness = [evaluate_fitness(bot) for bot in bots]
+log_generation_summary(logger, gen_num, bots, fitness)
+```
+
+**Information Displayed:**
+- Top 20 bots ranked by fitness (ROI)
+- Bot ID, ROI%, total trades, settled trades, win rate, signal type
+- Distribution of signal types across population
+- Category preferences of top 10 performers
+
+---
+
+### compute_generation_stats(bots: list[GeneticBot]) → dict
+
+Compute summary statistics for a completed generation.
+
+<ParamField path="bots" type="list[GeneticBot]" required>
+  List of all bots in the generation
+</ParamField>
+
+<ResponseField name="stats" type="dict">
+  Dictionary containing:
+  - `best_roi`: Highest fitness (ROI%) in generation
+  - `median_roi`: Median fitness across all bots
+  - `worst_roi`: Lowest fitness in generation
+  - `mean_roi`: Average fitness across all bots
+  - `mean_trades`: Average number of trades per bot
+  - `max_trades`: Maximum trades by any single bot
+  - `mean_win_rate`: Average win rate percentage
+  - `total_settled`: Total settled positions across all bots
+  - `active_bots`: Number of bots that made at least one trade
+</ResponseField>
+
+```python
+from genetic.monitor import compute_generation_stats
+
+stats = compute_generation_stats(bots)
+print(f"Best ROI: {stats['best_roi']:.2f}%")
+print(f"Median ROI: {stats['median_roi']:.2f}%")
+print(f"Mean trades: {stats['mean_trades']:.1f}")
+print(f"Active bots: {stats['active_bots']}/{len(bots)}")
+```
+
+## Usage Example
+
+Complete monitoring setup for an evolution loop:
+
+```python
+from genetic.monitor import (
+    setup_logging,
+    log_tick_progress,
+    log_generation_summary,
+    compute_generation_stats
+)
+from genetic.config import PROGRESS_LOG_INTERVAL_TICKS
+
+# Initialize
+logger = setup_logging()
+logger.info("Starting evolution...")
+
+# During generation
+for tick in range(total_ticks):
+    # Trading logic here
+    for bot in bots:
+        bot.tick()
+    
+    # Periodic progress
+    if tick % PROGRESS_LOG_INTERVAL_TICKS == 0:
+        log_tick_progress(logger, gen_num, tick, bots, feed)
+
+# After generation
+fitness = [evaluate_fitness(bot) for bot in bots]
+log_generation_summary(logger, gen_num, bots, fitness)
+
+stats = compute_generation_stats(bots)
+logger.info(f"Best: {stats['best_roi']:.2f}%, Active: {stats['active_bots']}")
+```
+
+## Configuration
+
+Uses these constants from `genetic.config`:
+- `STATE_DIR`: Directory for log file storage
+- `TICK_INTERVAL_SECONDS`: Used to calculate elapsed hours

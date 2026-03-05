@@ -1,0 +1,302 @@
+---
+title: "Genome Export"
+description: "Export trained genomes into standalone real trading bots"
+---
+
+## Overview
+
+The `export.py` module provides utilities to export evolved genomes from the genetic algorithm into standalone Python trading bots that can run independently for paper trading or real trading on Kalshi.
+
+## Command-Line Interface
+
+```bash
+# Export the best bot ever trained
+python -m genetic.export
+
+# Export from a specific generation
+python -m genetic.export --generation 5
+
+# Export a specific genome by ID
+python -m genetic.export --genome-id a1b2c3d4
+
+# Just inspect the hall of fame (no export)
+python -m genetic.export --show
+```
+
+## Functions
+
+### show_hall_of_fame()
+
+Print the hall of fame leaderboard to console.
+
+**Output Example:**
+```
+===========================================================================
+  HALL OF FAME  (updated: 2023-12-31 10:30:45)
+  Latest generation: 10
+===========================================================================
+Rank  Genome     Gen   ROI%    Trades  WinRate     PnL          Signal
+---------------------------------------------------------------------------
+1     a1b2c3d4   7     25.3%      234    68.2%  $25.30       momentum
+2     e5f6g7h8   9     22.1%      189    64.5%  $22.10    price_level
+3     i9j0k1l2   10    19.8%      156    61.3%  $19.80           value
+...
+
+Best ever: genome a1b2c3d4 (25.3% ROI, gen 7)
+
+To export as a real bot:
+  python -m genetic.export --genome-id a1b2c3d4
+```
+
+```python
+from genetic.export import show_hall_of_fame
+
+show_hall_of_fame()
+```
+
+---
+
+### get_genome_from_hof()
+
+Get a genome entry from the hall of fame.
+
+<ParamField path="genome_id" type="str | None">
+  Genome ID to retrieve (if None, returns best ever)
+</ParamField>
+
+<ResponseField name="result" type="tuple[dict, dict] | None">
+  Tuple of (entry_dict, genome_dict) if found, None otherwise
+</ResponseField>
+
+```python
+from genetic.export import get_genome_from_hof
+
+# Get best ever
+result = get_genome_from_hof()
+if result:
+    entry, genome_dict = result
+    print(f"Best: {entry['fitness_roi_pct']:.1f}% ROI")
+
+# Get specific genome
+result = get_genome_from_hof("a1b2c3d4")
+if result:
+    entry, genome_dict = result
+    print(f"Found genome from generation {entry['generation']}")
+```
+
+---
+
+### get_genome_from_generation()
+
+Get a genome from a specific generation file.
+
+<ParamField path="generation" type="int" required>
+  Generation number to load from
+</ParamField>
+
+<ParamField path="genome_id" type="str | None">
+  Specific genome ID (if None, returns best from generation)
+</ParamField>
+
+<ResponseField name="result" type="tuple[dict, dict] | None">
+  Tuple of (entry_dict, genome_dict) if found, None otherwise
+</ResponseField>
+
+```python
+from genetic.export import get_genome_from_generation
+
+# Get best from generation 5
+result = get_genome_from_generation(5)
+if result:
+    entry, genome_dict = result
+    print(f"Best in gen 5: {entry['fitness_roi_pct']:.1f}% ROI")
+
+# Get specific genome from generation 5
+result = get_genome_from_generation(5, "e5f6g7h8")
+```
+
+---
+
+### export_genome()
+
+Export a genome as a standalone real trading bot.
+
+<ParamField path="entry" type="dict" required>
+  Entry dictionary from hall of fame or generation file
+</ParamField>
+
+<ParamField path="genome_dict" type="dict" required>
+  Genome dictionary (serialized Genome object)
+</ParamField>
+
+**Files Created:**
+- `data/evolution/exports/genome_{genome_id}.json` - Genome data with decoded params
+- `data/evolution/exports/bot_{genome_id}.py` - Standalone trading bot script
+
+**Output Example:**
+```
+Exported genome a1b2c3d4:
+  Genome JSON: data/evolution/exports/genome_a1b2c3d4.json
+  Trading bot: data/evolution/exports/bot_a1b2c3d4.py
+
+  Decoded strategy:
+    Signal type:      momentum
+    Categories:       ['politics', 'economics']
+    Bankroll frac:    0.050
+    Max concurrent:   5
+    Max trades/day:   20
+    Price range:      $0.20 - $0.80
+    Daily loss limit: 5.0%
+
+  To paper trade (dry run):
+    DRY_RUN=true python data/evolution/exports/bot_a1b2c3d4.py
+
+  To trade for real (CAREFUL):
+    DRY_RUN=false python data/evolution/exports/bot_a1b2c3d4.py
+```
+
+```python
+from genetic.export import get_genome_from_hof, export_genome
+
+result = get_genome_from_hof()
+if result:
+    entry, genome_dict = result
+    export_genome(entry, genome_dict)
+```
+
+---
+
+## Generated Bot Structure
+
+The exported bot is a standalone Python file with:
+
+### Hardcoded Genome
+All gene values embedded as constants
+
+### Environment Variables
+- `DRY_RUN` - Set to "true" for paper trading, "false" for real trading
+- `BANKROLL_USD` - Initial bankroll amount (default: 100)
+
+### Trading Modes
+
+#### Paper Trading Mode (DRY_RUN=true)
+- Uses `PaperTradingEngine` for local simulation
+- No real orders placed
+- Logs progress every 60 ticks
+- Safe for testing strategies
+
+```bash
+DRY_RUN=true BANKROLL_USD=1000 python bot_a1b2c3d4.py
+```
+
+#### Real Trading Mode (DRY_RUN=false)
+- Places actual orders via Kalshi API
+- Requires valid API credentials
+- Respects all genome parameters (max trades/day, loss limits, etc.)
+- **USE WITH CAUTION**
+
+```bash
+DRY_RUN=false BANKROLL_USD=100 python bot_a1b2c3d4.py
+```
+
+### Signal Generation
+
+The bot includes a `_generate_signal()` function that implements all supported signal types:
+- `price_level` - Trade when price is in threshold range
+- `momentum` - Follow price momentum over lookback period
+- `mean_reversion` - Trade against Z-score deviations
+- `value` - Trade when edge exceeds minimum
+- `contrarian` - Fade extreme prices
+
+### Risk Management
+
+The real trading mode enforces:
+- Maximum concurrent positions
+- Maximum trades per day
+- Daily loss limits
+- Price range filters
+- Volume filters
+- Time to expiry constraints
+
+## Complete Export Workflow
+
+```python
+from genetic.export import (
+    show_hall_of_fame,
+    get_genome_from_hof,
+    export_genome
+)
+
+# 1. View hall of fame
+show_hall_of_fame()
+
+# 2. Select and export best genome
+result = get_genome_from_hof()
+if result:
+    entry, genome_dict = result
+    
+    # Show strategy details
+    print(f"\nExporting genome {genome_dict['id']}:")
+    print(f"  Generation: {entry['generation']}")
+    print(f"  Training ROI: {entry['fitness_roi_pct']:.1f}%")
+    print(f"  Win rate: {entry['win_rate'] * 100:.1f}%")
+    print(f"  Signal: {entry['signal_type']}")
+    
+    # Export
+    export_genome(entry, genome_dict)
+    
+    print("\n✓ Ready for deployment!")
+```
+
+## Genome JSON Structure
+
+The exported JSON file contains:
+
+```json
+{
+  "genome": {
+    "id": "a1b2c3d4",
+    "generation": 7,
+    "signal_type_idx": 1,
+    "bankroll_fraction": 0.05,
+    ...
+  },
+  "decoded_params": {
+    "signal_type": "momentum",
+    "bankroll_fraction": 0.05,
+    "max_concurrent": 5,
+    "momentum_lookback_ticks": 12,
+    ...
+  },
+  "categories": ["politics", "economics"],
+  "source": {
+    "fitness_roi_pct": 25.3,
+    "total_trades": 234,
+    "settled_trades": 189,
+    "win_rate": 0.682,
+    "realized_pnl": 25.30,
+    "generation": 7,
+    "signal_type": "momentum"
+  }
+}
+```
+
+## Safety Notes
+
+<Warning>
+  **Real Trading Risks**
+  - Exported bots place real orders when `DRY_RUN=false`
+  - Always test in paper trading mode first
+  - Past performance (training ROI) does not guarantee future results
+  - Monitor bots closely when running in production
+  - Start with small bankrolls to limit risk
+</Warning>
+
+<Tip>
+  **Best Practices**
+  - Run `--show` first to review all candidates
+  - Test exported bots in paper trading mode for at least 24 hours
+  - Compare paper trading results to training ROI before going live
+  - Use environment variables to easily switch between modes
+  - Keep exported bots version-controlled
+</Tip>
